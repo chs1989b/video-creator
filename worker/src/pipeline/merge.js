@@ -22,6 +22,18 @@ export async function mergeSegments(
 
   const inputArgs = segmentPaths.flatMap((p) => ['-i', p]);
 
+  // ASSUMPTION: every generated segment has an audio stream. This unconditionally
+  // builds an `acrossfade` filter and maps `[i:a]`/`[audioLabel]` for each input,
+  // matching the existing single-segment path above (`-c copy`, which also
+  // carries audio through) and what this module's tests verify. It is UNVERIFIED
+  // against real Higgsfield output — the CLI notes never confirmed a successful
+  // generation to inspect, so we don't actually know whether the generated clips
+  // carry audio. If ffmpeg fails here with something like "Stream specifier ':a'
+  // in filtergraph ... matches no streams" (from the `acrossfade` filters or the
+  // final `-map [audioLabel]`), that means the segments are video-only: the fix
+  // is to probe the first segment for an audio stream (e.g. `ffprobe -select_streams a`)
+  // and, when absent, build a video-only filter chain (drop the `acrossfade`
+  // filters and the audio `-map`) instead of assuming audio is present.
   let videoLabel = '[0:v]';
   let audioLabel = '[0:a]';
   let cumulativeOffset = durations[0];
