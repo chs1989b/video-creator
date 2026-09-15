@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - 세그먼트 길이는 4~30초 사이여야 함 (Higgsfield Genjutsu의 처리 한도) — 기본값 10초로 구현
-- 캐릭터 이미지는 세그먼트당 최대 49개까지 업로드 가능 (Higgsfield 제약)
+- 캐릭터 이미지는 정확히 1개만 사용 (Higgsfield `kling3_0_motion_control` 워크플로우 제약 — 2026-09-15 실제 CLI 조사로 확인, 스펙 작성 당시 가정했던 "최대 49개"는 이 워크플로우와 무관한 다른 기능이었음)
 - 생성 엔진 연동은 반드시 공식 Higgsfield CLI(`@higgsfield/cli`)로만 수행 — 브라우저 자동화(Playwright)는 사용하지 않음
 - Job/세그먼트 상태 저장은 파일 기반 저장소(lowdb)만 사용 — Redis 등 큐 브로커 도입 금지 (1인용 로컬 도구 규모, YAGNI)
 - 입력 영상은 본인 소유/권한 보유 영상으로 범위를 제한함 (코드로 강제하지는 않음 — 정책적 제약)
@@ -425,10 +425,10 @@ git commit -m "feat: add ffmpeg segment splitting"
 - Test: `worker/test/generate.test.js`
 
 **Interfaces:**
-- Consumes: `execFile` from Task 2; **Task 1의 `docs/higgsfield-cli-notes.md` 조사 결과** (아래 코드의 명령/플래그명은 반드시 그 문서 내용으로 교체할 것)
-- Produces: `generateFromSegment(segmentPath, characterImagePaths, outputPath, { execFile }?) => Promise<{ outputPath: string }>` — Task 8(jobRunner.js)이 사용
+- Consumes: `execFile` from Task 2
+- Produces: `generateFromSegment(segmentPath, characterImagePath, outputPath, { execFile }?) => Promise<{ outputPath: string }>` — Task 8(jobRunner.js)이 사용 (주의: **단수** `characterImagePath` — 문자열 1개, 배열 아님)
 
-**중요**: 아래 구현의 `higgsfield` 서브커맨드명과 플래그명(`generate`, `video`, `--model`, `--motion`, `--character`, `--output`)은 Task 1을 쓰기 시점에 아직 검증 전이라 임시로 가장 가능성 높은 형태로 작성한 것임. **이 태스크를 시작하기 전에 반드시 `docs/higgsfield-cli-notes.md`를 열어서 실제 값으로 아래 `args` 배열을 교체할 것.**
+**Task 1 조사 결과 반영됨** (`docs/higgsfield-cli-notes.md`, 2026-09-15 실제 CLI 실행으로 확인): 실제 워크플로우 이름은 `kling3_0_motion_control`이며, 이미지·영상 레퍼런스 각각 정확히 1개만 받음(웹 UI의 "최대 49개"는 이 CLI 워크플로우와 무관). `--duration`은 비용 조회 전용이라 실제 생성 명령엔 넣지 않음. 결과는 JSON의 `result_url` 필드에 원격 URL로 나오며, 로컬에 자동 저장되지 않으므로 `curl`로 직접 다운로드함. 실패 시 CLI가 0이 아닌 종료 코드를 반환해 `execFile`이 자동으로 reject하므로, 그 에러 메시지를 그대로 상위로 전파하면 됨(별도 파싱 불필요).
 
 - [ ] **Step 1: 실패하는 테스트 작성**
 
@@ -439,31 +439,61 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateFromSegment } from '../src/pipeline/generate.js';
 
-test('generateFromSegment calls higgsfield CLI with motion, character images, and output path', async () => {
+test('generateFromSegment calls the Higgsfield CLI workflow, then downloads result_url', async () => {
   const calls = [];
   const fakeExecFile = async (command, args) => {
     calls.push({ command, args });
+    if (command === 'higgsfield') {
+      return {
+        stdout: JSON.stringify([
+          { id: 'job-123', status: 'succeeded', result_url: 'https://example.com/result.mp4' },
+        ]),
+        stderr: '',
+      };
+    }
     return { stdout: '', stderr: '' };
   };
 
   const result = await generateFromSegment(
     '/tmp/job1/segment-000.mp4',
-    ['/tmp/job1/char1.png', '/tmp/job1/char2.png'],
+    '/tmp/job1/char1.png',
     '/tmp/job1/generated-0.mp4',
     { execFile: fakeExecFile },
   );
 
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].command, 'higgsfield');
   assert.deepEqual(calls[0].args, [
-    'generate', 'video',
-    '--model', 'genjutsu',
-    '--motion', '/tmp/job1/segment-000.mp4',
-    '--character', '/tmp/job1/char1.png',
-    '--character', '/tmp/job1/char2.png',
-    '--output', '/tmp/job1/generated-0.mp4',
+    'generate', 'workflow', 'kling3_0_motion_control',
+    '--video-references', '/tmp/job1/segment-000.mp4',
+    '--image-references', '/tmp/job1/char1.png',
+    '--mode', 'std',
+    '--wait', '--json',
   ]);
+
+  assert.equal(calls[1].command, 'curl');
+  assert.deepEqual(calls[1].args, [
+    '-sS', '-o', '/tmp/job1/generated-0.mp4', 'https://example.com/result.mp4',
+  ]);
+
   assert.equal(result.outputPath, '/tmp/job1/generated-0.mp4');
+});
+
+test('generateFromSegment throws a clear error when the job has no result_url', async () => {
+  const fakeExecFile = async (command) => {
+    if (command === 'higgsfield') {
+      return {
+        stdout: JSON.stringify([{ id: 'job-456', status: 'failed', result_url: null }]),
+        stderr: '',
+      };
+    }
+    return { stdout: '', stderr: '' };
+  };
+
+  await assert.rejects(
+    generateFromSegment('/tmp/a.mp4', '/tmp/char.png', '/tmp/out.mp4', { execFile: fakeExecFile }),
+    /job-456/,
+  );
 });
 ```
 
@@ -475,7 +505,7 @@ cd worker && node --test test/generate.test.js
 
 Expected: FAIL — 모듈 없음
 
-- [ ] **Step 3: 최소 구현 작성** (Task 1 조사 결과로 아래 `args` 내용을 먼저 교체한 뒤 작성)
+- [ ] **Step 3: 최소 구현 작성**
 
 `worker/src/pipeline/generate.js`:
 
@@ -484,19 +514,24 @@ import { execFile as defaultExecFile } from './exec.js';
 
 export async function generateFromSegment(
   segmentPath,
-  characterImagePaths,
+  characterImagePath,
   outputPath,
   { execFile = defaultExecFile } = {},
 ) {
-  const args = [
-    'generate', 'video',
-    '--model', 'genjutsu',
-    '--motion', segmentPath,
-    ...characterImagePaths.flatMap((imagePath) => ['--character', imagePath]),
-    '--output', outputPath,
-  ];
+  const { stdout } = await execFile('higgsfield', [
+    'generate', 'workflow', 'kling3_0_motion_control',
+    '--video-references', segmentPath,
+    '--image-references', characterImagePath,
+    '--mode', 'std',
+    '--wait', '--json',
+  ]);
 
-  await execFile('higgsfield', args);
+  const [job] = JSON.parse(stdout);
+  if (!job.result_url) {
+    throw new Error(`Higgsfield job ${job.id} finished without a result_url (status: ${job.status})`);
+  }
+
+  await execFile('curl', ['-sS', '-o', outputPath, job.result_url]);
   return { outputPath };
 }
 ```
@@ -507,7 +542,7 @@ export async function generateFromSegment(
 cd worker && node --test test/generate.test.js
 ```
 
-Expected: PASS
+Expected: PASS (2/2)
 
 - [ ] **Step 5: 커밋**
 
@@ -1013,7 +1048,7 @@ export async function runJob(db, jobId, workDir, deps = {}) {
     for (const segment of segments) {
       const outputPath = path.join(workDir, `generated-${segment.index}.mp4`);
       try {
-        await generateFromSegment(segment.path, job.characterImagePaths, outputPath);
+        await generateFromSegment(segment.path, job.characterImagePaths[0], outputPath);
         resultPaths.push(outputPath);
         await setSegmentStatus(db, jobId, segment.index, 'done', outputPath);
       } catch (error) {
@@ -1050,7 +1085,7 @@ export async function retrySegment(db, jobId, segmentIndex, workDir, deps = {}) 
 
   const outputPath = path.join(workDir, `generated-${segmentIndex}.mp4`);
   try {
-    await generateFromSegment(segment.path, job.characterImagePaths, outputPath);
+    await generateFromSegment(segment.path, job.characterImagePaths[0], outputPath);
     await setSegmentStatus(db, jobId, segmentIndex, 'done', outputPath);
   } catch (error) {
     await setSegmentStatus(db, jobId, segmentIndex, 'failed', null, error.message);
@@ -1092,7 +1127,7 @@ git commit -m "feat: add job orchestrator with retry support"
 `createApp`은 `runJob`/`retrySegment`를 주입받을 수 있어야 함 — 테스트에서 실제 yt-dlp/ffmpeg/higgsfield 호출 없이 라우팅과 상태 저장만 검증하기 위함.
 
 **API:**
-- `POST /jobs` (multipart: `youtubeUrl` 필드 + `characterImages` 파일 최대 49개) → 201, job 객체 반환. 백그라운드로 `runJob` 실행 시작 (응답은 기다리지 않음)
+- `POST /jobs` (multipart: `youtubeUrl` 필드 + `characterImages` 파일 정확히 1개) → 201, job 객체 반환. 백그라운드로 `runJob` 실행 시작 (응답은 기다리지 않음)
 - `GET /jobs` → 200, job 배열
 - `GET /jobs/:id` → 200 job 객체, 없으면 404
 - `POST /jobs/:id/segments/:index/retry` → `retrySegment` 실행, 200 `{ ok: true }` 또는 실패 시 500
@@ -1196,7 +1231,7 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
   const db = createDb(path.join(dataDir, 'db.json'));
   const upload = multer({ dest: path.join(dataDir, 'uploads') });
 
-  app.post('/jobs', upload.array('characterImages', 49), async (req, res) => {
+  app.post('/jobs', upload.array('characterImages', 1), async (req, res) => {
     const { youtubeUrl } = req.body;
     if (!youtubeUrl) {
       res.status(400).json({ error: 'youtubeUrl is required' });
