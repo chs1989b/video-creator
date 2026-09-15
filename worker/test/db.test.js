@@ -33,3 +33,31 @@ test('createJob, getJob, listJobs, updateJob round-trip through a real temp file
 
   assert.equal(await getJob(db, 'missing'), null);
 });
+
+test('concurrent updateJob calls on different jobs do not lose writes', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'db-test-concurrent-'));
+  const db = createDb(path.join(tmpDir, 'db.json'));
+
+  await createJob(db, {
+    id: 'job-a',
+    youtubeUrl: 'https://youtube.com/watch?v=a',
+    characterImagePaths: [],
+  });
+  await createJob(db, {
+    id: 'job-b',
+    youtubeUrl: 'https://youtube.com/watch?v=b',
+    characterImagePaths: [],
+  });
+
+  // Fire both updates without awaiting the first before starting the second,
+  // so their read-then-write cycles would interleave without serialization.
+  await Promise.all([
+    updateJob(db, 'job-a', { status: 'downloading' }),
+    updateJob(db, 'job-b', { status: 'segmenting' }),
+  ]);
+
+  const jobA = await getJob(db, 'job-a');
+  const jobB = await getJob(db, 'job-b');
+  assert.equal(jobA.status, 'downloading');
+  assert.equal(jobB.status, 'segmenting');
+});
