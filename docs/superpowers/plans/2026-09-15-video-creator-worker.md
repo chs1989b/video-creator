@@ -1334,6 +1334,10 @@ git commit -m "feat: add Express API for job management"
 
 **Files:** 없음 (검증만 수행)
 
+**진행 상황 (2026-09-15)**: 크레딧 제약(무료 10개 중 세그먼트 1개당 8~17개 소모)으로 전체 curl/API 플로우 대신, 본인 소유 유튜브 Shorts 영상(15.4초 → 앞 4초 트리밍) + 실제 얼굴 사진으로 **핵심 생성 단계(Higgsfield CLI 호출)만 직접 실행하여 단일 세그먼트 성공 여부 검증 완료**. 결과: `status: "completed"`, `result_url` 정상 반환, 다운로드한 영상 육안 확인 결과 모션 전이 우수하게 작동함 (`docs/higgsfield-cli-notes.md` 참고). 8크레딧 소모, 잔여 2크레딧.
+
+**아직 미검증**: 여러 세그먼트를 이어붙이는 연속성(크로스페이드) 테스트, 전체 Express API/curl 플로우를 통한 end-to-end 실행. 크레딧 확보(유료 전환 등) 후 진행 필요.
+
 - [ ] **Step 1: 워커 서버 기동**
 
 ```bash
