@@ -57,6 +57,28 @@ test('getJob throws on a non-ok response', async () => {
   await expect(getJob('missing', { fetchFn: fakeFetch as typeof fetch })).rejects.toThrow(/404/);
 });
 
+test('createJob throws a friendly connection error when fetchFn itself fails', async () => {
+  const fakeFetch = async () => {
+    throw new Error('network down');
+  };
+
+  await expect(
+    createJob('https://youtube.com/watch?v=abc', fakeFile('char.png'), {
+      fetchFn: fakeFetch as unknown as typeof fetch,
+    }),
+  ).rejects.toThrow(/워커 서버에 연결할 수 없습니다/);
+});
+
+test('getJob throws a friendly connection error when fetchFn itself fails', async () => {
+  const fakeFetch = async () => {
+    throw new Error('network down');
+  };
+
+  await expect(
+    getJob('job-1', { fetchFn: fakeFetch as unknown as typeof fetch }),
+  ).rejects.toThrow(/워커 서버에 연결할 수 없습니다/);
+});
+
 test('resultUrl builds the download URL for a job', () => {
   expect(resultUrl('job-1', { baseUrl: 'http://localhost:4000' })).toBe(
     'http://localhost:4000/jobs/job-1/result',

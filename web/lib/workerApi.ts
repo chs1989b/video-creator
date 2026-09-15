@@ -33,7 +33,12 @@ export async function createJob(
   form.append('youtubeUrl', youtubeUrl);
   form.append('characterImages', characterImage);
 
-  const res = await fetchFn(`${baseUrl}/jobs`, { method: 'POST', body: form });
+  let res: Response;
+  try {
+    res = await fetchFn(`${baseUrl}/jobs`, { method: 'POST', body: form });
+  } catch {
+    throw new Error('워커 서버에 연결할 수 없습니다. worker가 실행 중인지 확인해주세요.');
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}) as { error?: string });
     throw new Error(body.error ?? `작업 생성 실패 (status ${res.status})`);
@@ -45,7 +50,12 @@ export async function getJob(
   id: string,
   { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
 ): Promise<Job> {
-  const res = await fetchFn(`${baseUrl}/jobs/${id}`);
+  let res: Response;
+  try {
+    res = await fetchFn(`${baseUrl}/jobs/${id}`);
+  } catch {
+    throw new Error('워커 서버에 연결할 수 없습니다. worker가 실행 중인지 확인해주세요.');
+  }
   if (!res.ok) {
     throw new Error(`작업 조회 실패: ${id} (status ${res.status})`);
   }
