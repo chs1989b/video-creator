@@ -52,3 +52,35 @@ test('splitIntoSegments creates contiguous 10-second segments covering the full 
     path.join('/tmp/job1', 'segment-002.mp4'),
   ]);
 });
+
+test('splitIntoSegments folds a trailing under-4-second remainder into the previous segment', async () => {
+  const fakeExecFile = async () => ({ stdout: '', stderr: '' });
+
+  const segments = await splitIntoSegments('/tmp/source.mp4', '/tmp/job1', 10, {
+    execFile: fakeExecFile,
+    duration: 21,
+  });
+
+  assert.equal(segments.length, 2);
+  for (const segment of segments) {
+    assert.ok(
+      segment.endSeconds - segment.startSeconds >= 4,
+      `segment ${segment.index} is shorter than the 4-second minimum`,
+    );
+  }
+  // Full coverage, no gaps.
+  assert.equal(segments[0].startSeconds, 0);
+  assert.equal(segments[0].endSeconds, segments[1].startSeconds);
+  assert.equal(segments[1].endSeconds, 21);
+});
+
+test('splitIntoSegments does not spawn a phantom near-zero final segment from float drift', async () => {
+  const fakeExecFile = async () => ({ stdout: '', stderr: '' });
+
+  const segments = await splitIntoSegments('/tmp/source.mp4', '/tmp/job1', 10, {
+    execFile: fakeExecFile,
+    duration: 30.000001,
+  });
+
+  assert.equal(segments.length, 3);
+});
