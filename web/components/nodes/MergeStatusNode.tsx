@@ -10,7 +10,11 @@ type Tone = 'idle' | 'active' | 'done' | 'failed';
 function summarize(job: Job | null): { text: string; tone: Tone } {
   if (!job) return { text: '대기 중', tone: 'idle' };
   if (job.status === 'failed') {
-    return { text: job.status === 'failed' ? '이전 단계 실패' : '대기 중', tone: 'failed' };
+    const allSegmentsDone = job.segments.length > 0 && job.segments.every((s) => s.status === 'done');
+    if (allSegmentsDone) {
+      return { text: `실패: ${job.error ?? '알 수 없는 오류'}`, tone: 'failed' };
+    }
+    return { text: '이전 단계 실패', tone: 'failed' };
   }
   if (job.status === 'merging') return { text: '병합 중', tone: 'active' };
   if (job.status === 'done') return { text: '완료', tone: 'done' };
