@@ -5,6 +5,16 @@ import type { Job } from '../../lib/workerApi';
 
 export type ResultNodeData = { job: Job | null; resultUrl: string | null };
 
+async function handleDownload(url: string, jobId: string) {
+  const res = await fetch(url);
+  const blobUrl = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = blobUrl;
+  a.download = `${jobId}.mp4`;
+  a.click();
+  URL.revokeObjectURL(blobUrl);
+}
+
 export function ResultNode({ data }: NodeProps & { data: ResultNodeData }) {
   const isDone = data.job?.status === 'done' && Boolean(data.resultUrl);
 
@@ -16,9 +26,13 @@ export function ResultNode({ data }: NodeProps & { data: ResultNodeData }) {
         <div className="space-y-2">
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <video src={data.resultUrl!} controls className="w-full rounded" />
-          <a href={data.resultUrl!} download className="block text-center text-sm text-emerald-400 underline">
+          <button
+            type="button"
+            onClick={() => handleDownload(data.resultUrl!, data.job!.id)}
+            className="block w-full text-center text-sm text-emerald-400 underline"
+          >
             다운로드
-          </a>
+          </button>
         </div>
       ) : (
         <div className="text-sm text-slate-500">아직 결과 없음</div>
