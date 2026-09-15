@@ -20,6 +20,10 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
       res.status(400).json({ error: 'youtubeUrl is required' });
       return;
     }
+    if (!req.files || req.files.length !== 1) {
+      res.status(400).json({ error: 'exactly one characterImages file is required' });
+      return;
+    }
 
     const id = randomUUID();
     const characterImagePaths = (req.files ?? []).map((file) => file.path);

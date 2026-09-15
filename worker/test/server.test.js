@@ -51,6 +51,20 @@ test('POST /jobs without youtubeUrl returns 400', async () => {
   }
 });
 
+test('POST /jobs without a characterImages file returns 400', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const form = new FormData();
+    form.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    const res = await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form });
+    assert.equal(res.status, 400);
+    const body = await res.json();
+    assert.match(body.error, /characterImages/);
+  } finally {
+    server.close();
+  }
+});
+
 test('GET /jobs/:id returns 404 for an unknown job', async () => {
   const { server, baseUrl } = await startTestServer();
   try {
