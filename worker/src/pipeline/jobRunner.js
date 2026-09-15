@@ -37,6 +37,7 @@ export async function runJob(db, jobId, workDir, deps = {}) {
 
     await updateJob(db, jobId, { status: 'generating' });
     const resultPaths = [];
+    let failedCount = 0;
     for (const segment of segments) {
       const outputPath = path.join(workDir, `generated-${segment.index}.mp4`);
       try {
@@ -44,9 +45,17 @@ export async function runJob(db, jobId, workDir, deps = {}) {
         resultPaths.push(outputPath);
         await setSegmentStatus(db, jobId, segment.index, 'done', outputPath);
       } catch (error) {
+        failedCount += 1;
         await setSegmentStatus(db, jobId, segment.index, 'failed', null, error.message);
-        throw error;
+        // Keep attempting the remaining segments instead of aborting the whole
+        // job on the first failure — each segment is generated (and billed)
+        // independently, and a later retry of just the failed one(s) can still
+        // complete the job without regenerating segments that already succeeded.
       }
+    }
+
+    if (failedCount > 0) {
+      throw new Error(`${failedCount} segment(s) failed to generate`);
     }
 
     await updateJob(db, jobId, { status: 'merging' });
@@ -65,6 +74,7 @@ export async function runJob(db, jobId, workDir, deps = {}) {
 
 export async function retrySegment(db, jobId, segmentIndex, workDir, deps = {}) {
   const generateFromSegment = deps.generateFromSegment ?? defaultGenerateFromSegment;
+  const mergeSegments = deps.mergeSegments ?? defaultMergeSegments;
 
   const job = await getJob(db, jobId);
   if (!job) {
@@ -84,5 +94,28 @@ export async function retrySegment(db, jobId, segmentIndex, workDir, deps = {}) 
     throw error;
   }
 
+  // A retry that clears the last failed segment is the only path back to a
+  // finished video after a partial failure (runJob no longer retries on its
+  // own). Once every segment is done, merge immediately so resultPath gets
+  // set and GET /jobs/:id/result stops 404ing; if segments are still
+  // failed/pending, leave the job as-is until they're retried too.
+  await maybeFinishJob(db, jobId, workDir, { mergeSegments });
+
   return { outputPath };
+}
+
+async function maybeFinishJob(db, jobId, workDir, { mergeSegments }) {
+  const job = await getJob(db, jobId);
+  const allDone = job.segments.length > 0 && job.segments.every((s) => s.status === 'done');
+  if (!allDone) {
+    return;
+  }
+
+  const resultPaths = [...job.segments]
+    .sort((a, b) => a.index - b.index)
+    .map((s) => s.resultPath);
+
+  const finalPath = path.join(workDir, 'final.mp4');
+  await mergeSegments(resultPaths, finalPath);
+  await updateJob(db, jobId, { status: 'done', resultPath: finalPath });
 }
