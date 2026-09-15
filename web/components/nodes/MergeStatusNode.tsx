@@ -21,21 +21,39 @@ function summarize(job: Job | null): { text: string; tone: Tone } {
   return { text: '대기 중', tone: 'idle' };
 }
 
-const toneClasses: Record<Tone, string> = {
-  idle: 'border-slate-700 bg-slate-900 text-slate-400',
-  active: 'border-amber-500 bg-amber-950 text-amber-200',
-  done: 'border-emerald-500 bg-emerald-950 text-emerald-200',
-  failed: 'border-red-500 bg-red-950 text-red-200',
+const toneBorder: Record<Tone, string> = {
+  idle: 'border-[#42424D]',
+  active: 'border-[#F7F13B]',
+  done: 'border-[#3BC48D]',
+  failed: 'border-[#F2495C]',
+};
+
+const toneTextClass: Record<Tone, string> = {
+  idle: 'text-[#72727A]',
+  active: 'text-[#F7F13B]',
+  done: 'text-[#3BC48D]',
+  failed: 'text-[#F2495C]',
+};
+
+const toneHandleColor: Record<Tone, string> = {
+  idle: '#72727A',
+  active: '#F7F13B',
+  done: '#3BC48D',
+  failed: '#F2495C',
 };
 
 export function MergeStatusNode({ data }: NodeProps & { data: MergeStatusNodeData }) {
   const { text, tone } = summarize(data.job);
   return (
-    <div className={`w-56 rounded-lg border p-3 shadow-lg ${toneClasses[tone]}`}>
-      <Handle type="target" position={Position.Left} />
-      <div className="mb-1 text-xs font-semibold uppercase tracking-wide opacity-70">병합</div>
-      <div className="text-sm">{text}</div>
-      <Handle type="source" position={Position.Right} />
+    <div className={`w-[240px] rounded-lg border bg-[#16161A] p-3 ${toneBorder[tone]}`}>
+      <Handle type="target" position={Position.Left} style={{ background: '#72727A', borderColor: '#72727A', width: 10, height: 10 }} />
+      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[#72727A]">병합</div>
+      <div className={`text-sm ${toneTextClass[tone]}`}>{text}</div>
+      <Handle
+        type="source"
+        position={Position.Right}
+        style={{ background: toneHandleColor[tone], borderColor: toneHandleColor[tone], width: 10, height: 10 }}
+      />
     </div>
   );
 }

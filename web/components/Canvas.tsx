@@ -73,10 +73,30 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
 }
 
 const initialEdges: Edge[] = [
-  { id: 'e-video-generate', source: 'video-input', target: 'generate' },
-  { id: 'e-character-generate', source: 'character-input', target: 'generate' },
-  { id: 'e-generate-merge', source: 'generate', target: 'merge' },
-  { id: 'e-merge-result', source: 'merge', target: 'result' },
+  {
+    id: 'e-video-generate',
+    source: 'video-input',
+    target: 'generate',
+    style: { stroke: '#892DBE', strokeWidth: 2 },
+  },
+  {
+    id: 'e-character-generate',
+    source: 'character-input',
+    target: 'generate',
+    style: { stroke: '#3BC48D', strokeWidth: 2 },
+  },
+  {
+    id: 'e-generate-merge',
+    source: 'generate',
+    target: 'merge',
+    style: { stroke: '#72727A', strokeWidth: 2 },
+  },
+  {
+    id: 'e-merge-result',
+    source: 'merge',
+    target: 'result',
+    style: { stroke: '#72727A', strokeWidth: 2 },
+  },
 ];
 
 export function Canvas() {
@@ -161,16 +181,16 @@ export function Canvas() {
   );
 
   return (
-    <div className="relative h-screen w-screen bg-slate-950">
+    <div className="relative h-screen w-screen bg-[#0A0A0A]">
       {errorMessage && (
-        <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded bg-red-900/90 px-4 py-2 text-sm text-red-100 shadow-lg">
+        <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg border border-[#F2495C] bg-[#16161A] px-4 py-2 text-sm text-[#F2495C]">
           {errorMessage}
         </div>
       )}
       <button
         onClick={handleRun}
         disabled={isSubmitting || isRunning}
-        className="absolute left-4 top-4 z-10 rounded-lg bg-emerald-600 px-4 py-2 font-semibold text-white shadow-lg hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-700"
+        className="absolute left-4 top-4 z-10 rounded-full border border-[#42424D] bg-[#16161A] px-4 py-2 text-sm font-medium text-[#FAFAFA] transition-colors hover:border-[#3BC48D] hover:text-[#3BC48D] disabled:cursor-not-allowed disabled:opacity-50"
       >
         {isRunning ? '생성 중...' : '실행'}
       </button>
@@ -183,8 +203,8 @@ export function Canvas() {
         onConnect={onConnect}
         fitView
       >
-        <Background />
-        <Controls />
+        <Background color="#232329" gap={24} size={1} />
+        <Controls className="[&_button]:border-[#42424D] [&_button]:bg-[#16161A] [&_button]:text-[#FAFAFA] [&_button]:fill-[#FAFAFA] [&_button:hover]:bg-[#2A2A30]" />
       </ReactFlow>
     </div>
   );

@@ -5,5 +5,6 @@
 html, body {
   height: 100%;
   margin: 0;
-  background-color: #020617;
+  background-color: #0a0a0a;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
 }
