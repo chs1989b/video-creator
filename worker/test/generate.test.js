@@ -36,7 +36,7 @@ test('generateFromSegment calls the Higgsfield CLI workflow, then downloads resu
 
   assert.equal(calls[1].command, 'curl');
   assert.deepEqual(calls[1].args, [
-    '-sS', '-o', '/tmp/job1/generated-0.mp4', 'https://example.com/result.mp4',
+    '-fsSL', '-o', '/tmp/job1/generated-0.mp4', 'https://example.com/result.mp4',
   ]);
 
   assert.equal(result.outputPath, '/tmp/job1/generated-0.mp4');

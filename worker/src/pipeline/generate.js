@@ -19,6 +19,9 @@ export async function generateFromSegment(
     throw new Error(`Higgsfield job ${job.id} finished without a result_url (status: ${job.status})`);
   }
 
-  await execFile('curl', ['-sS', '-o', outputPath, job.result_url]);
+  // -f: fail (nonzero exit) on HTTP error responses instead of saving the error
+  // body as if it were the video. -L: follow redirects instead of saving a
+  // redirect stub.
+  await execFile('curl', ['-fsSL', '-o', outputPath, job.result_url]);
   return { outputPath };
 }
