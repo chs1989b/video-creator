@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -133,38 +133,27 @@ export function Canvas() {
   }, [url, characterFile, stopPolling]);
 
   // 노드 위치(드래그 결과)는 useNodesState가 자체적으로 유지함.
-  // 여기서는 각 노드의 `data`만 최신 상태로 갱신 — 위치는 건드리지 않음.
-  useEffect(() => {
-    setNodes((current) =>
-      current.map((node) => {
-        if (node.id === 'video-input') {
-          const data: VideoInputNodeData = { url, onUrlChange: setUrl, disabled: isRunning };
-          return { ...node, data };
-        }
-        if (node.id === 'character-input') {
-          const data: CharacterInputNodeData = {
-            fileName: characterFile?.name ?? null,
-            onFileChange: setCharacterFile,
-            disabled: isRunning,
-          };
-          return { ...node, data };
-        }
-        if (node.id === 'generate') {
-          const data: GenerateStatusNodeData = { job };
-          return { ...node, data };
-        }
-        if (node.id === 'merge') {
-          const data: MergeStatusNodeData = { job };
-          return { ...node, data };
-        }
-        if (node.id === 'result') {
-          const data: ResultNodeData = { job, resultUrl: job ? resultUrl(job.id) : null };
-          return { ...node, data };
-        }
-        return node;
-      }),
-    );
-  }, [url, characterFile, job, isRunning, setNodes]);
+  // 각 노드의 `data`는 렌더 시점에 useMemo로 파생시켜 위치와 분리함
+  // (setNodes를 통한 useEffect 동기화는 불필요한 추가 렌더를 유발하므로 사용하지 않음).
+  const dataById = useMemo<Record<string, AnyNodeData>>(
+    () => ({
+      'video-input': { url, onUrlChange: setUrl, disabled: isRunning || isSubmitting },
+      'character-input': {
+        fileName: characterFile?.name ?? null,
+        onFileChange: setCharacterFile,
+        disabled: isRunning || isSubmitting,
+      },
+      generate: { job },
+      merge: { job },
+      result: { job, resultUrl: job ? resultUrl(job.id) : null },
+    }),
+    [url, characterFile, job, isRunning, isSubmitting],
+  );
+
+  const renderNodes = useMemo(
+    () => nodes.map((node) => ({ ...node, data: dataById[node.id] ?? node.data })),
+    [nodes, dataById],
+  );
 
   const onConnect = useCallback(
     (connection: Connection) => setEdges((eds) => addEdge(connection, eds)),
@@ -186,7 +175,7 @@ export function Canvas() {
         {isRunning ? '생성 중...' : '실행'}
       </button>
       <ReactFlow
-        nodes={nodes}
+        nodes={renderNodes}
         edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
