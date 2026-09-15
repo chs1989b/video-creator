@@ -10,9 +10,7 @@ async function setSegmentStatus(db, jobId, index, status, resultPath, error) {
   const segment = job.segments.find((s) => s.index === index);
   segment.status = status;
   segment.resultPath = resultPath;
-  if (error) {
-    segment.error = error;
-  }
+  segment.error = error ?? null;
   await updateJob(db, jobId, { segments: job.segments });
 }
 

@@ -100,6 +100,10 @@ test('retrySegment re-runs a single segment and updates only that segment', asyn
 
   await assert.rejects(runJob(db, 'job-1', tmpDir, failingDeps));
 
+  const failedJob = await getJob(db, 'job-1');
+  assert.equal(failedJob.segments[0].status, 'failed');
+  assert.equal(failedJob.segments[0].error, 'boom');
+
   const retryResult = await retrySegment(db, 'job-1', 0, tmpDir, {
     generateFromSegment: async (_segmentPath, _chars, outputPath) => ({ outputPath }),
   });
@@ -109,4 +113,5 @@ test('retrySegment re-runs a single segment and updates only that segment', asyn
   const job = await getJob(db, 'job-1');
   assert.equal(job.segments[0].status, 'done');
   assert.equal(job.segments[0].resultPath, path.join(tmpDir, 'generated-0.mp4'));
+  assert.equal(job.segments[0].error, null, 'stale error from the earlier failure must be cleared on a successful retry');
 });
