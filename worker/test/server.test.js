@@ -40,6 +40,25 @@ test('POST /jobs creates a job and GET /jobs lists it', async () => {
   }
 });
 
+test('POST /jobs saves the uploaded character image with its original extension', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const form = new FormData();
+    form.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    form.append('characterImages', new Blob([new Uint8Array([1, 2, 3])]), 'char.png');
+
+    const createRes = await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form });
+    const created = await createRes.json();
+
+    // Higgsfield's CLI (and similar tools) detect media type from the file
+    // extension, so a saved upload with no extension breaks generation later.
+    assert.equal(created.characterImagePaths.length, 1);
+    assert.match(created.characterImagePaths[0], /\.png$/);
+  } finally {
+    server.close();
+  }
+});
+
 test('POST /jobs without youtubeUrl returns 400', async () => {
   const { server, baseUrl } = await startTestServer();
   try {

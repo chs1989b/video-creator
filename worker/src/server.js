@@ -3,6 +3,7 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'node:path';
 import fs from 'node:fs/promises';
+import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { createDb, createJob, getJob, listJobs } from './pipeline/db.js';
 import { runJob as defaultRunJob, retrySegment as defaultRetrySegment } from './pipeline/jobRunner.js';
@@ -12,7 +13,17 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
   app.use(cors());
 
   const db = createDb(path.join(dataDir, 'db.json'));
-  const upload = multer({ dest: path.join(dataDir, 'uploads') });
+  const uploadsDir = path.join(dataDir, 'uploads');
+  // multer.diskStorage's destination callback does NOT auto-create the directory
+  // the way the bare `dest:` shorthand used to — create it explicitly up front.
+  mkdirSync(uploadsDir, { recursive: true });
+  const storage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    // multer's default filename has no extension, which breaks CLIs (like the
+    // Higgsfield CLI) that detect media type from the file extension.
+    filename: (_req, file, cb) => cb(null, `${randomUUID()}${path.extname(file.originalname)}`),
+  });
+  const upload = multer({ storage });
 
   app.post('/jobs', upload.array('characterImages', 1), async (req, res) => {
     const { youtubeUrl } = req.body;
