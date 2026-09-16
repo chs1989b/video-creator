@@ -4,8 +4,8 @@ import { generateFromSegment } from '../src/pipeline/generate.js';
 
 test('generateFromSegment calls the Higgsfield CLI workflow, then downloads result_url', async () => {
   const calls = [];
-  const fakeExecFile = async (command, args) => {
-    calls.push({ command, args });
+  const fakeExecFile = async (command, args, options) => {
+    calls.push({ command, args, options });
     if (command === 'higgsfield') {
       return {
         stdout: JSON.stringify([
@@ -33,6 +33,10 @@ test('generateFromSegment calls the Higgsfield CLI workflow, then downloads resu
     '--mode', 'std',
     '--wait', '--json',
   ]);
+  // The Higgsfield CLI's --wait has been observed to hang indefinitely in
+  // real use; the call must be bounded so a hung generation fails the
+  // segment instead of blocking the worker forever.
+  assert.ok(calls[0].options.timeout > 0, 'higgsfield call must have a positive timeout');
 
   assert.equal(calls[1].command, 'curl');
   assert.deepEqual(calls[1].args, [
