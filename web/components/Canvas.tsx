@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
+  BackgroundVariant,
   Controls,
   addEdge,
   useNodesState,
@@ -14,143 +15,83 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { VideoInputNode, type VideoInputNodeData } from './nodes/VideoInputNode';
-import { CharacterInputNode, type CharacterInputNodeData } from './nodes/CharacterInputNode';
-import { ProductInputNode, type ProductInputNodeData } from './nodes/ProductInputNode';
-import { ScriptInputNode, type ScriptInputNodeData } from './nodes/ScriptInputNode';
-import { GenerateStatusNode, type GenerateStatusNodeData } from './nodes/GenerateStatusNode';
-import { MergeStatusNode, type MergeStatusNodeData } from './nodes/MergeStatusNode';
-import { VoiceoverStatusNode, type VoiceoverStatusNodeData } from './nodes/VoiceoverStatusNode';
+import { ImageInputNode, type ImageInputNodeData } from './nodes/ImageInputNode';
+import { TextInputNode, type TextInputNodeData } from './nodes/TextInputNode';
+import { StageNode, type StageNodeData } from './nodes/StageNode';
 import { ResultNode, type ResultNodeData } from './nodes/ResultNode';
 import { createJob, getJob, resultUrl, type Job } from '../lib/workerApi';
 
 const nodeTypes = {
   videoInput: VideoInputNode,
-  characterInput: CharacterInputNode,
-  productInput: ProductInputNode,
-  scriptInput: ScriptInputNode,
-  generateStatus: GenerateStatusNode,
-  mergeStatus: MergeStatusNode,
-  voiceoverStatus: VoiceoverStatusNode,
+  imageInput: ImageInputNode,
+  textInput: TextInputNode,
+  stage: StageNode,
   result: ResultNode,
 };
 
 type AnyNodeData =
   | VideoInputNodeData
-  | CharacterInputNodeData
-  | ProductInputNodeData
-  | ScriptInputNodeData
-  | GenerateStatusNodeData
-  | MergeStatusNodeData
-  | VoiceoverStatusNodeData
+  | ImageInputNodeData
+  | TextInputNodeData
+  | StageNodeData
   | ResultNodeData;
 
 const POLL_INTERVAL_MS = 2000;
 
+const MEDIA = 'var(--media)';
+const TEXT = 'var(--text-edge)';
+const QUIET = 'var(--ink-faint)';
+
+// Positions sketch the pipeline left to right; inputs hang off the stage they
+// feed so the picture reads as "what goes into what".
 function buildInitialNodes(): Node<AnyNodeData>[] {
+  const noop = () => {};
   return [
-    {
-      id: 'video-input',
-      type: 'videoInput',
-      position: { x: 0, y: 0 },
-      data: { url: '', onUrlChange: () => {}, disabled: false },
-    },
-    {
-      id: 'character-input',
-      type: 'characterInput',
-      position: { x: 0, y: 180 },
-      data: { fileName: null, onFileChange: () => {}, disabled: false },
-    },
-    {
-      id: 'product-input',
-      type: 'productInput',
-      position: { x: 0, y: 360 },
-      data: { fileName: null, onFileChange: () => {}, disabled: false },
-    },
-    {
-      id: 'script-input',
-      type: 'scriptInput',
-      position: { x: 660, y: 420 },
-      data: { script: '', onScriptChange: () => {}, disabled: false },
-    },
-    {
-      id: 'generate',
-      type: 'generateStatus',
-      position: { x: 340, y: 180 },
-      data: { job: null },
-    },
-    {
-      id: 'merge',
-      type: 'mergeStatus',
-      position: { x: 660, y: 180 },
-      data: { job: null },
-    },
-    {
-      id: 'voiceover',
-      type: 'voiceoverStatus',
-      position: { x: 980, y: 180 },
-      data: { job: null },
-    },
-    {
-      id: 'result',
-      type: 'result',
-      position: { x: 1300, y: 180 },
-      data: { job: null, resultUrl: null },
-    },
+    { id: 'video', type: 'videoInput', position: { x: 0, y: 40 }, data: { url: '', onUrlChange: noop, disabled: false } },
+    { id: 'person', type: 'imageInput', position: { x: 20, y: 300 }, data: { title: '바꿀 인물', hint: '인물 사진', file: null, onFileChange: noop, disabled: false } },
+    { id: 'product', type: 'imageInput', position: { x: 20, y: 560 }, data: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: null, onFileChange: noop, disabled: false } },
+    { id: 'generate', type: 'stage', position: { x: 340, y: 300 }, data: { stage: 'generate', job: null } },
+    { id: 'merge', type: 'stage', position: { x: 620, y: 300 }, data: { stage: 'merge', job: null } },
+    { id: 'edit-prompt', type: 'textInput', position: { x: 620, y: 40 }, data: { title: '보정 프롬프트', placeholder: '예: 조명을 더 따뜻하게, 배경은 그대로', hint: '비우면 보정 없이 넘어갑니다', value: '', onChange: noop, disabled: false } },
+    { id: 'edit', type: 'stage', position: { x: 900, y: 300 }, data: { stage: 'edit', job: null } },
+    { id: 'script', type: 'textInput', position: { x: 900, y: 560 }, data: { title: '나레이션 대본', placeholder: '영상에 얹을 말을 적어주세요', hint: '비우면 음성 없이 만듭니다', value: '', onChange: noop, disabled: false } },
+    { id: 'voiceover', type: 'stage', position: { x: 1180, y: 300 }, data: { stage: 'voiceover', job: null } },
+    { id: 'result', type: 'result', position: { x: 1460, y: 270 }, data: { job: null, resultUrl: null } },
   ];
 }
 
-const initialEdges: Edge[] = [
-  {
-    id: 'e-video-generate',
-    source: 'video-input',
-    target: 'generate',
-    style: { stroke: '#892DBE', strokeWidth: 2 },
-  },
-  {
-    id: 'e-character-generate',
-    source: 'character-input',
-    target: 'generate',
-    style: { stroke: '#3BC48D', strokeWidth: 2 },
-  },
-  {
-    id: 'e-product-generate',
-    source: 'product-input',
-    target: 'generate',
-    style: { stroke: '#E0A83B', strokeWidth: 2 },
-  },
-  {
-    id: 'e-generate-merge',
-    source: 'generate',
-    target: 'merge',
-    style: { stroke: '#72727A', strokeWidth: 2 },
-  },
-  {
-    id: 'e-merge-voiceover',
-    source: 'merge',
-    target: 'voiceover',
-    style: { stroke: '#72727A', strokeWidth: 2 },
-  },
-  {
-    id: 'e-script-voiceover',
-    source: 'script-input',
-    target: 'voiceover',
-    style: { stroke: '#4FA3E0', strokeWidth: 2 },
-  },
-  {
-    id: 'e-voiceover-result',
-    source: 'voiceover',
-    target: 'result',
-    style: { stroke: '#72727A', strokeWidth: 2 },
-  },
+type EdgeSpec = { id: string; source: string; target: string; color: string; stage?: Job['status'] };
+
+const edgeSpecs: EdgeSpec[] = [
+  { id: 'video-generate', source: 'video', target: 'generate', color: MEDIA, stage: 'generating' },
+  { id: 'person-generate', source: 'person', target: 'generate', color: MEDIA, stage: 'generating' },
+  { id: 'product-generate', source: 'product', target: 'generate', color: MEDIA, stage: 'generating' },
+  { id: 'generate-merge', source: 'generate', target: 'merge', color: QUIET, stage: 'merging' },
+  { id: 'merge-edit', source: 'merge', target: 'edit', color: QUIET, stage: 'editing' },
+  { id: 'prompt-edit', source: 'edit-prompt', target: 'edit', color: TEXT, stage: 'editing' },
+  { id: 'edit-voiceover', source: 'edit', target: 'voiceover', color: QUIET, stage: 'voiceover' },
+  { id: 'script-voiceover', source: 'script', target: 'voiceover', color: TEXT, stage: 'voiceover' },
+  { id: 'voiceover-result', source: 'voiceover', target: 'result', color: QUIET },
 ];
 
+function buildEdges(job: Job | null): Edge[] {
+  return edgeSpecs.map((e) => ({
+    id: e.id,
+    source: e.source,
+    target: e.target,
+    style: { stroke: e.color },
+    className: job && e.stage && job.status === e.stage ? 'is-running' : undefined,
+  }));
+}
+
 export function Canvas() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<AnyNodeData>>(buildInitialNodes());
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(initialEdges);
+  const [nodes, , onNodesChange] = useNodesState<Node<AnyNodeData>>(buildInitialNodes());
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(buildEdges(null));
 
   const [url, setUrl] = useState('');
-  const [characterFile, setCharacterFile] = useState<File | null>(null);
+  const [personFile, setPersonFile] = useState<File | null>(null);
   const [productFile, setProductFile] = useState<File | null>(null);
+  const [editPrompt, setEditPrompt] = useState('');
   const [script, setScript] = useState('');
   const [job, setJob] = useState<Job | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -158,6 +99,7 @@ export function Canvas() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isRunning = job !== null && job.status !== 'done' && job.status !== 'failed';
+  const locked = isRunning || isSubmitting;
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
@@ -168,9 +110,14 @@ export function Canvas() {
 
   useEffect(() => stopPolling, [stopPolling]);
 
+  // Edge animation follows the job: only the edges feeding the running stage move.
+  useEffect(() => {
+    setEdges(buildEdges(job));
+  }, [job, setEdges]);
+
   const handleRun = useCallback(async () => {
-    if (!url || !characterFile) {
-      setErrorMessage('유튜브 URL과 캐릭터 이미지를 모두 입력해주세요.');
+    if (!url || !personFile) {
+      setErrorMessage('원본 영상 링크와 바꿀 인물 사진이 필요합니다.');
       return;
     }
     setErrorMessage(null);
@@ -178,9 +125,10 @@ export function Canvas() {
     try {
       const created = await createJob({
         youtubeUrl: url,
-        characterImage: characterFile,
+        characterImage: personFile,
         productImage: productFile,
         script,
+        editPrompt,
       });
       setJob(created);
       stopPolling();
@@ -192,45 +140,44 @@ export function Canvas() {
             stopPolling();
           }
         } catch {
-          // 스펙 §8: 폴링 중 네트워크 오류는 조용히 다음 폴링에서 재시도 (배너 없음, YAGNI).
-          // 워커가 완전히 죽은 경우 무한 재시도가 되지만, 개인용 로컬 도구 규모에서는
-          // 사용자가 워커 로그를 직접 보고 문제를 알아채는 것으로 충분하다고 판단함.
+          // 폴링 중 일시적 네트워크 오류는 다음 폴링에서 자연히 회복된다.
         }
       }, POLL_INTERVAL_MS);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '작업 생성에 실패했습니다.');
+      setErrorMessage(error instanceof Error ? error.message : '작업을 시작하지 못했습니다.');
     } finally {
       setIsSubmitting(false);
     }
-  }, [url, characterFile, productFile, script, stopPolling]);
+  }, [url, personFile, productFile, script, editPrompt, stopPolling]);
 
-  // 노드 위치(드래그 결과)는 useNodesState가 자체적으로 유지함.
-  // 각 노드의 `data`는 렌더 시점에 useMemo로 파생시켜 위치와 분리함
-  // (setNodes를 통한 useEffect 동기화는 불필요한 추가 렌더를 유발하므로 사용하지 않음).
   const dataById = useMemo<Record<string, AnyNodeData>>(
     () => ({
-      'video-input': { url, onUrlChange: setUrl, disabled: isRunning || isSubmitting },
-      'character-input': {
-        fileName: characterFile?.name ?? null,
-        onFileChange: setCharacterFile,
-        disabled: isRunning || isSubmitting,
+      video: { url, onUrlChange: setUrl, disabled: locked },
+      person: { title: '바꿀 인물', hint: '인물 사진', file: personFile, onFileChange: setPersonFile, disabled: locked },
+      product: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: productFile, onFileChange: setProductFile, disabled: locked },
+      'edit-prompt': {
+        title: '보정 프롬프트',
+        placeholder: '예: 조명을 더 따뜻하게, 배경은 그대로',
+        hint: '비우면 보정 없이 넘어갑니다',
+        value: editPrompt,
+        onChange: setEditPrompt,
+        disabled: locked,
       },
-      'product-input': {
-        fileName: productFile?.name ?? null,
-        onFileChange: setProductFile,
-        disabled: isRunning || isSubmitting,
+      script: {
+        title: '나레이션 대본',
+        placeholder: '영상에 얹을 말을 적어주세요',
+        hint: '비우면 음성 없이 만듭니다',
+        value: script,
+        onChange: setScript,
+        disabled: locked,
       },
-      'script-input': {
-        script,
-        onScriptChange: setScript,
-        disabled: isRunning || isSubmitting,
-      },
-      generate: { job },
-      merge: { job },
-      voiceover: { job },
+      generate: { stage: 'generate', job },
+      merge: { stage: 'merge', job },
+      edit: { stage: 'edit', job },
+      voiceover: { stage: 'voiceover', job },
       result: { job, resultUrl: job ? resultUrl(job.id) : null },
     }),
-    [url, characterFile, productFile, script, job, isRunning, isSubmitting],
+    [url, personFile, productFile, editPrompt, script, job, locked],
   );
 
   const renderNodes = useMemo(
@@ -243,20 +190,37 @@ export function Canvas() {
     [setEdges],
   );
 
+  const runLabel = isSubmitting ? '보내는 중' : isRunning ? '만드는 중' : '영상 만들기';
+
   return (
-    <div className="relative h-screen w-screen bg-[#0A0A0A]">
+    <div className="relative h-screen w-screen bg-[var(--canvas)]">
+      <div className="pointer-events-none absolute left-5 top-4 z-10 text-[12px] text-[var(--ink-muted)]">
+        얼굴·제품 교체 워크플로
+      </div>
+
       {errorMessage && (
-        <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg border border-[#F2495C] bg-[#16161A] px-4 py-2 text-sm text-[#F2495C]">
+        <div
+          role="alert"
+          className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-md border border-[var(--danger)] bg-[var(--card)] px-3 py-1.5 text-[12px] text-[var(--ink)]"
+        >
           {errorMessage}
         </div>
       )}
+
       <button
+        type="button"
         onClick={handleRun}
-        disabled={isSubmitting || isRunning}
-        className="absolute left-4 top-4 z-10 rounded-full border border-[#42424D] bg-[#16161A] px-4 py-2 text-sm font-medium text-[#FAFAFA] transition-colors hover:border-[#3BC48D] hover:text-[#3BC48D] disabled:cursor-not-allowed disabled:opacity-50"
+        disabled={locked}
+        className="absolute bottom-7 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2.5 rounded-full border border-[var(--card-border-strong)] bg-[rgba(18,18,20,0.85)] px-6 py-3 text-[14px] font-medium tracking-wide text-[var(--ink)] shadow-[0_12px_40px_rgba(0,0,0,0.7)] backdrop-blur transition-colors hover:border-[var(--media)] disabled:cursor-progress disabled:opacity-70"
       >
-        {isRunning ? '생성 중...' : '실행'}
+        <span
+          aria-hidden
+          className="inline-block h-2 w-2 rounded-full"
+          style={{ background: isRunning ? 'var(--text-edge)' : 'var(--media)' }}
+        />
+        {runLabel}
       </button>
+
       <ReactFlow
         nodes={renderNodes}
         edges={edges}
@@ -265,9 +229,10 @@ export function Canvas() {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         fitView
+        fitViewOptions={{ padding: 0.18 }}
       >
-        <Background color="#232329" gap={24} size={1} />
-        <Controls className="[&_button]:border-[#42424D] [&_button]:bg-[#16161A] [&_button]:text-[#FAFAFA] [&_button]:fill-[#FAFAFA] [&_button:hover]:bg-[#2A2A30]" />
+        <Background variant={BackgroundVariant.Dots} color="var(--grid)" gap={22} size={1} />
+        <Controls showInteractive={false} position="bottom-left" />
       </ReactFlow>
     </div>
   );

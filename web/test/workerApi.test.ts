@@ -44,6 +44,7 @@ test('createJob appends productImages and script only when given', async () => {
       characterImage: fakeFile('char.png'),
       productImage: fakeFile('eyeliner.jpg'),
       script: '  Meet my eyeliner.  ',
+      editPrompt: ' Warmer light ',
     },
     { fetchFn: fakeFetch as typeof fetch },
   );
@@ -51,6 +52,7 @@ test('createJob appends productImages and script only when given', async () => {
   const body = calls[0].init.body as FormData;
   expect((body.get('productImages') as File).name).toBe('eyeliner.jpg');
   expect(body.get('script')).toBe('Meet my eyeliner.');
+  expect(body.get('editPrompt')).toBe('Warmer light');
 });
 
 test('createJob omits a blank script', async () => {

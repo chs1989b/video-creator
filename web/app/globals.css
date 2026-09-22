@@ -2,9 +2,112 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body {
+:root {
+  --canvas: #050505;
+  --grid: #1b1b1e;
+  --card: #121214;
+  --card-border: #26262a;
+  --card-border-strong: #3a3a40;
+  --ink: #ececee;
+  --ink-muted: #8b8b94;
+  --ink-faint: #55555d;
+  --media: #27c48a;
+  --text-edge: #e6c84a;
+  --danger: #e25b4f;
+}
+
+html,
+body {
   height: 100%;
   margin: 0;
-  background-color: #0a0a0a;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  background-color: var(--canvas);
+  color: var(--ink);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Pretendard", "Apple SD Gothic Neo", "SF Pro Text", system-ui,
+    sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* React Flow chrome, tuned to recede behind the cards. */
+.react-flow .react-flow__attribution {
+  background: transparent;
+}
+
+.react-flow .react-flow__attribution a {
+  color: var(--ink-faint);
+}
+
+.react-flow__edge-path {
+  stroke-width: 1.5;
+}
+
+.react-flow__edge.is-running .react-flow__edge-path {
+  stroke-dasharray: 6 6;
+  animation: edge-flow 1.2s linear infinite;
+}
+
+@keyframes edge-flow {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge.is-running .react-flow__edge-path {
+    animation: none;
+  }
+}
+
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  border-width: 1.5px;
+  border-color: var(--canvas);
+}
+
+.react-flow .react-flow__controls {
+  box-shadow: none;
+  gap: 2px;
+}
+
+.react-flow .react-flow__controls-button {
+  width: 26px;
+  height: 26px;
+  background: var(--card);
+  border: 1px solid var(--card-border);
+  border-radius: 6px;
+  color: var(--ink-muted);
+  fill: var(--ink-muted);
+}
+
+.react-flow .react-flow__controls-button:hover {
+  background: #1a1a1d;
+  color: var(--ink);
+  fill: var(--ink);
+}
+
+.react-flow .react-flow__controls-button svg {
+  max-width: 12px;
+  max-height: 12px;
+  fill: currentColor;
+}
+
+.react-flow__node:focus-visible,
+.react-flow__node.selected > div {
+  outline: 1px solid var(--card-border-strong);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+textarea,
+input {
+  font: inherit;
+}
+
+textarea:focus-visible,
+input:focus-visible,
+button:focus-visible {
+  outline: 1.5px solid var(--media);
+  outline-offset: 1px;
 }

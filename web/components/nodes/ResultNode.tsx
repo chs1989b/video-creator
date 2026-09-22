@@ -1,7 +1,8 @@
 'use client';
 
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import type { NodeProps } from '@xyflow/react';
 import type { Job } from '../../lib/workerApi';
+import { NodeCard } from './NodeCard';
 
 export type ResultNodeData = { job: Job | null; resultUrl: string | null };
 
@@ -17,26 +18,29 @@ async function handleDownload(url: string, jobId: string) {
 
 export function ResultNode({ data }: NodeProps & { data: ResultNodeData }) {
   const isDone = data.job?.status === 'done' && Boolean(data.resultUrl);
+  const tone = isDone ? 'done' : data.job?.status === 'failed' ? 'failed' : 'idle';
 
   return (
-    <div className="w-[280px] rounded-lg border border-[#42424D] bg-[#16161A] p-3 text-[#FAFAFA]">
-      <Handle type="target" position={Position.Left} style={{ background: '#72727A', borderColor: '#72727A', width: 10, height: 10 }} />
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-[#72727A]">결과</div>
-      {isDone ? (
-        <div className="space-y-2">
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <video src={data.resultUrl!} controls className="w-full rounded" />
-          <button
-            type="button"
-            onClick={() => handleDownload(data.resultUrl!, data.job!.id)}
-            className="block w-full rounded-full border border-[#42424D] bg-[#2A2A30] py-1.5 text-center text-xs font-medium text-[#FAFAFA] transition-colors hover:border-[#3BC48D] hover:text-[#3BC48D]"
-          >
-            다운로드
-          </button>
-        </div>
-      ) : (
-        <div className="text-sm text-[#595966]">아직 결과 없음</div>
+    <NodeCard title="완성 영상" width={260} tone={tone} input>
+      <div className="aspect-video w-full overflow-hidden rounded-md bg-black">
+        {isDone ? (
+          // eslint-disable-next-line jsx-a11y/media-has-caption
+          <video src={data.resultUrl!} controls className="h-full w-full object-cover" />
+        ) : (
+          <div className="flex h-full items-center justify-center text-[11px] text-[var(--ink-faint)]">
+            {data.job?.status === 'failed' ? '만들지 못했습니다' : '아직 없음'}
+          </div>
+        )}
+      </div>
+      {isDone && (
+        <button
+          type="button"
+          onClick={() => handleDownload(data.resultUrl!, data.job!.id)}
+          className="mt-2 w-full rounded-md border border-[var(--card-border)] py-1.5 text-[12px] text-[var(--ink)] transition-colors hover:border-[var(--media)] hover:text-[var(--media)]"
+        >
+          mp4 저장
+        </button>
       )}
-    </div>
+    </NodeCard>
   );
 }
