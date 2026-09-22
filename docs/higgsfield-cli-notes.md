@@ -218,4 +218,26 @@ higgsfield generate create ad_multiplier --mode video_edit \
 - 결과 `worker/data/test-ad_multiplier-pexels8143138-aiface-eyeliner-20260923.mp4`. 흰 병 → 검정 리퀴드 아이라이너 펜(펜촉 표현됨), 손가락 그립도 펜 모양에 맞게 바뀜, 인물·배경·동작은 9/22 결과와 동일하게 유지.
 - 레퍼런스 순서 = 인자 순서로 동작함(첫 `--image-references`가 "first reference image"). 제품 사진에 브랜드명이 있으면 `ip_detected` 위험이 있으니 무브랜드 사진을 쓰거나 로고를 잘라낼 것 — 첫 후보(Pexels 2693644, "venus" 각인)는 그래서 제외함.
 
+## ✅ 2026-09-23 — 음성(TTS) 조사 및 보이스오버 테스트 (3단계)
+
+**모델 지형** (`higgsfield model list --json`, 총 91개):
+- TTS: `text2speech_v2`(variant elevenlabs/minimax/seed_speech/vibe_voice/cozy_voice, 프리셋 음성 필수, **0.3크레딧**/문장 몇 개), `qwen_audio_tts`(language ko 포함, **0.03크레딧**), `inworld_text_to_speech`(음성 이름을 직접 지정, 한국어 Hyunwoo/Minji/Seojun/Yoona), `mirelo_text_to_audio`, `seed_audio`, `sonilo_music`.
+- 립싱크/토킹헤드 전용 모델: **없음**. `ad_multiplier`·`seedance_2_5`·`wan3_0`은 `--audio-references`를 받지만(비용 동일 70) 입 모양을 오디오에 맞추는지는 **미검증**.
+- 대본 생성용 LLM: **없음** (`brain_activity`는 "Virality Predictor").
+- `dubbing`(target_language 필수), `voice_change`(voice_id 필수) — 원본 영상에 말소리가 있어야 함. Pexels 무음 소스엔 해당 없음.
+- 음성 메타: `voices list`/`voices get`은 id·name·voice_type만 줌. 성별·나이는 TTS 잡 응답의 `params.voice`(gender/age/supported_models)에만 나옴.
+
+**실행**:
+```bash
+higgsfield generate create text2speech_v2 --prompt "<대본>" --variant elevenlabs \
+  --voice-id a00bc7f3-0236-5e76-ac65-90137ce0f5a4 --voice-type preset --wait --json
+```
+→ 8초 만에 `completed`, 0.3크레딧, `result_url`에 mp3(44.1kHz 모노, 10.48초). 음성 "Brielle"은 응답상 female/old. 결과 `worker/data/voiceover-brielle-20260923.mp3`.
+
+**영상에 얹기** (생성 영상은 비디오 스트림만 있으므로 음성이 유일한 오디오 트랙):
+```bash
+ffmpeg -y -i final.mp4 -i voiceover.mp3 -map 0:v -map 1:a -c:v copy -c:a aac -af apad -shortest final-voiced.mp4
+```
+`apad`+`-shortest` 조합으로 음성이 짧으면 무음 패딩, 길면 영상 길이에서 잘림 → 영상 길이 불변. 결과 `worker/data/test-ad_multiplier-pexels8143138-aiface-eyeliner-voiced-20260923.mp4`. 이 두 명령이 그대로 `worker/src/pipeline/voiceover.js`에 들어감.
+
 **교훈(9/22)**: 업로드가 느린 환경에서는 워커의 파일 경로 전달 방식이 취약함. 대안으로 (a) 워커가 `upload create`로 먼저 올리고 ID로 `generate create`를 호출하도록 분리하면 실패 지점을 좁히고 재시도도 단계별로 할 수 있음, (b) 세그먼트 파일 크기 축소. 둘 다 아직 미구현 — 안정 네트워크에서 현 코드로 먼저 성공을 확인한 뒤 판단.
