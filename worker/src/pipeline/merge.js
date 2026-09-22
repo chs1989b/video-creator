@@ -4,7 +4,12 @@ import { getDuration as defaultGetDuration } from './segment.js';
 export async function mergeSegments(
   segmentPaths,
   outputPath,
-  { execFile = defaultExecFile, crossfadeSeconds = 0.5, getDuration = defaultGetDuration } = {},
+  {
+    execFile = defaultExecFile,
+    crossfadeSeconds = 0.5,
+    getDuration = defaultGetDuration,
+    hasAudioStream: hasAudioStreamFn = hasAudioStream,
+  } = {},
 ) {
   if (segmentPaths.length === 0) {
     throw new Error('mergeSegments requires at least one segment');
@@ -20,20 +25,14 @@ export async function mergeSegments(
     durations.push(await getDuration(segmentPath, { execFile }));
   }
 
+  // Confirmed 2026-09-17 against real Higgsfield output (two actual generated
+  // segments, ffprobe'd): the clips are video-only, no audio stream. Only
+  // build the acrossfade chain and audio map when the source actually has
+  // audio, instead of assuming it does.
+  const withAudio = await hasAudioStreamFn(segmentPaths[0], execFile);
+
   const inputArgs = segmentPaths.flatMap((p) => ['-i', p]);
 
-  // ASSUMPTION: every generated segment has an audio stream. This unconditionally
-  // builds an `acrossfade` filter and maps `[i:a]`/`[audioLabel]` for each input,
-  // matching the existing single-segment path above (`-c copy`, which also
-  // carries audio through) and what this module's tests verify. It is UNVERIFIED
-  // against real Higgsfield output — the CLI notes never confirmed a successful
-  // generation to inspect, so we don't actually know whether the generated clips
-  // carry audio. If ffmpeg fails here with something like "Stream specifier ':a'
-  // in filtergraph ... matches no streams" (from the `acrossfade` filters or the
-  // final `-map [audioLabel]`), that means the segments are video-only: the fix
-  // is to probe the first segment for an audio stream (e.g. `ffprobe -select_streams a`)
-  // and, when absent, build a video-only filter chain (drop the `acrossfade`
-  // filters and the audio `-map`) instead of assuming audio is present.
   let videoLabel = '[0:v]';
   let audioLabel = '[0:a]';
   let cumulativeOffset = durations[0];
@@ -47,7 +46,9 @@ export async function mergeSegments(
     filters.push(
       `${videoLabel}[${i}:v]xfade=transition=fade:duration=${crossfadeSeconds}:offset=${offset}${nextVideoLabel}`,
     );
-    filters.push(`${audioLabel}[${i}:a]acrossfade=d=${crossfadeSeconds}${nextAudioLabel}`);
+    if (withAudio) {
+      filters.push(`${audioLabel}[${i}:a]acrossfade=d=${crossfadeSeconds}${nextAudioLabel}`);
+    }
 
     videoLabel = nextVideoLabel;
     audioLabel = nextAudioLabel;
@@ -55,15 +56,26 @@ export async function mergeSegments(
   }
 
   const filterComplex = filters.join(';');
+  const mapArgs = withAudio ? ['-map', videoLabel, '-map', audioLabel] : ['-map', videoLabel];
 
   await execFile('ffmpeg', [
     '-y',
     ...inputArgs,
     '-filter_complex', filterComplex,
-    '-map', videoLabel,
-    '-map', audioLabel,
+    ...mapArgs,
     outputPath,
   ]);
 
   return { outputPath };
+}
+
+async function hasAudioStream(filePath, execFile) {
+  const { stdout } = await execFile('ffprobe', [
+    '-v', 'error',
+    '-select_streams', 'a',
+    '-show_entries', 'stream=index',
+    '-of', 'csv=p=0',
+    filePath,
+  ]);
+  return stdout.trim().length > 0;
 }
