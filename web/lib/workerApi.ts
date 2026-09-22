@@ -13,7 +13,8 @@ export type Job = {
   youtubeUrl: string;
   characterImagePaths: string[];
   productImagePaths: string[];
-  status: 'pending' | 'downloading' | 'segmenting' | 'generating' | 'merging' | 'done' | 'failed';
+  script: string | null;
+  status: 'pending' | 'downloading' | 'segmenting' | 'generating' | 'merging' | 'voiceover' | 'done' | 'failed';
   segments: JobSegment[];
   resultPath: string | null;
   createdAt: string;
@@ -25,10 +26,15 @@ const DEFAULT_BASE_URL =
 
 type ClientOptions = { baseUrl?: string; fetchFn?: typeof fetch };
 
+export type CreateJobInput = {
+  youtubeUrl: string;
+  characterImage: File;
+  productImage?: File | null;
+  script?: string | null;
+};
+
 export async function createJob(
-  youtubeUrl: string,
-  characterImage: File,
-  productImage: File | null,
+  { youtubeUrl, characterImage, productImage = null, script = null }: CreateJobInput,
   { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
 ): Promise<Job> {
   const form = new FormData();
@@ -36,6 +42,9 @@ export async function createJob(
   form.append('characterImages', characterImage);
   if (productImage) {
     form.append('productImages', productImage);
+  }
+  if (script && script.trim()) {
+    form.append('script', script.trim());
   }
 
   let res: Response;

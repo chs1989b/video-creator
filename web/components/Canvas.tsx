@@ -16,8 +16,10 @@ import '@xyflow/react/dist/style.css';
 import { VideoInputNode, type VideoInputNodeData } from './nodes/VideoInputNode';
 import { CharacterInputNode, type CharacterInputNodeData } from './nodes/CharacterInputNode';
 import { ProductInputNode, type ProductInputNodeData } from './nodes/ProductInputNode';
+import { ScriptInputNode, type ScriptInputNodeData } from './nodes/ScriptInputNode';
 import { GenerateStatusNode, type GenerateStatusNodeData } from './nodes/GenerateStatusNode';
 import { MergeStatusNode, type MergeStatusNodeData } from './nodes/MergeStatusNode';
+import { VoiceoverStatusNode, type VoiceoverStatusNodeData } from './nodes/VoiceoverStatusNode';
 import { ResultNode, type ResultNodeData } from './nodes/ResultNode';
 import { createJob, getJob, resultUrl, type Job } from '../lib/workerApi';
 
@@ -25,8 +27,10 @@ const nodeTypes = {
   videoInput: VideoInputNode,
   characterInput: CharacterInputNode,
   productInput: ProductInputNode,
+  scriptInput: ScriptInputNode,
   generateStatus: GenerateStatusNode,
   mergeStatus: MergeStatusNode,
+  voiceoverStatus: VoiceoverStatusNode,
   result: ResultNode,
 };
 
@@ -34,8 +38,10 @@ type AnyNodeData =
   | VideoInputNodeData
   | CharacterInputNodeData
   | ProductInputNodeData
+  | ScriptInputNodeData
   | GenerateStatusNodeData
   | MergeStatusNodeData
+  | VoiceoverStatusNodeData
   | ResultNodeData;
 
 const POLL_INTERVAL_MS = 2000;
@@ -61,6 +67,12 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
       data: { fileName: null, onFileChange: () => {}, disabled: false },
     },
     {
+      id: 'script-input',
+      type: 'scriptInput',
+      position: { x: 660, y: 420 },
+      data: { script: '', onScriptChange: () => {}, disabled: false },
+    },
+    {
       id: 'generate',
       type: 'generateStatus',
       position: { x: 340, y: 180 },
@@ -73,9 +85,15 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
       data: { job: null },
     },
     {
+      id: 'voiceover',
+      type: 'voiceoverStatus',
+      position: { x: 980, y: 180 },
+      data: { job: null },
+    },
+    {
       id: 'result',
       type: 'result',
-      position: { x: 980, y: 180 },
+      position: { x: 1300, y: 180 },
       data: { job: null, resultUrl: null },
     },
   ];
@@ -107,8 +125,20 @@ const initialEdges: Edge[] = [
     style: { stroke: '#72727A', strokeWidth: 2 },
   },
   {
-    id: 'e-merge-result',
+    id: 'e-merge-voiceover',
     source: 'merge',
+    target: 'voiceover',
+    style: { stroke: '#72727A', strokeWidth: 2 },
+  },
+  {
+    id: 'e-script-voiceover',
+    source: 'script-input',
+    target: 'voiceover',
+    style: { stroke: '#4FA3E0', strokeWidth: 2 },
+  },
+  {
+    id: 'e-voiceover-result',
+    source: 'voiceover',
     target: 'result',
     style: { stroke: '#72727A', strokeWidth: 2 },
   },
@@ -121,6 +151,7 @@ export function Canvas() {
   const [url, setUrl] = useState('');
   const [characterFile, setCharacterFile] = useState<File | null>(null);
   const [productFile, setProductFile] = useState<File | null>(null);
+  const [script, setScript] = useState('');
   const [job, setJob] = useState<Job | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -145,7 +176,12 @@ export function Canvas() {
     setErrorMessage(null);
     setIsSubmitting(true);
     try {
-      const created = await createJob(url, characterFile, productFile);
+      const created = await createJob({
+        youtubeUrl: url,
+        characterImage: characterFile,
+        productImage: productFile,
+        script,
+      });
       setJob(created);
       stopPolling();
       pollRef.current = setInterval(async () => {
@@ -166,7 +202,7 @@ export function Canvas() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [url, characterFile, productFile, stopPolling]);
+  }, [url, characterFile, productFile, script, stopPolling]);
 
   // 노드 위치(드래그 결과)는 useNodesState가 자체적으로 유지함.
   // 각 노드의 `data`는 렌더 시점에 useMemo로 파생시켜 위치와 분리함
@@ -184,11 +220,17 @@ export function Canvas() {
         onFileChange: setProductFile,
         disabled: isRunning || isSubmitting,
       },
+      'script-input': {
+        script,
+        onScriptChange: setScript,
+        disabled: isRunning || isSubmitting,
+      },
       generate: { job },
       merge: { job },
+      voiceover: { job },
       result: { job, resultUrl: job ? resultUrl(job.id) : null },
     }),
-    [url, characterFile, productFile, job, isRunning, isSubmitting],
+    [url, characterFile, productFile, script, job, isRunning, isSubmitting],
   );
 
   const renderNodes = useMemo(

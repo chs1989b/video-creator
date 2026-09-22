@@ -15,10 +15,10 @@ test('createJob posts youtubeUrl and characterImages as multipart form data', as
     );
   };
 
-  const job = await createJob('https://youtube.com/watch?v=abc', fakeFile('char.png'), null, {
-    baseUrl: 'http://localhost:4000',
-    fetchFn: fakeFetch as typeof fetch,
-  });
+  const job = await createJob(
+    { youtubeUrl: 'https://youtube.com/watch?v=abc', characterImage: fakeFile('char.png') },
+    { baseUrl: 'http://localhost:4000', fetchFn: fakeFetch as typeof fetch },
+  );
 
   expect(calls.length).toBe(1);
   expect(calls[0].url).toBe('http://localhost:4000/jobs');
@@ -27,22 +27,45 @@ test('createJob posts youtubeUrl and characterImages as multipart form data', as
   expect(body.get('youtubeUrl')).toBe('https://youtube.com/watch?v=abc');
   expect((body.get('characterImages') as File).name).toBe('char.png');
   expect(body.get('productImages')).toBeNull();
+  expect(body.get('script')).toBeNull();
   expect(job.id).toBe('job-1');
 });
 
-test('createJob appends productImages only when a product image is given', async () => {
+test('createJob appends productImages and script only when given', async () => {
   const calls: Array<{ init: RequestInit }> = [];
   const fakeFetch = async (_url: string | URL, init?: RequestInit) => {
     calls.push({ init: init ?? {} });
     return new Response(JSON.stringify({ id: 'job-2', status: 'pending' }), { status: 201 });
   };
 
-  await createJob('https://youtube.com/watch?v=abc', fakeFile('char.png'), fakeFile('eyeliner.jpg'), {
-    fetchFn: fakeFetch as typeof fetch,
-  });
+  await createJob(
+    {
+      youtubeUrl: 'https://youtube.com/watch?v=abc',
+      characterImage: fakeFile('char.png'),
+      productImage: fakeFile('eyeliner.jpg'),
+      script: '  Meet my eyeliner.  ',
+    },
+    { fetchFn: fakeFetch as typeof fetch },
+  );
 
   const body = calls[0].init.body as FormData;
   expect((body.get('productImages') as File).name).toBe('eyeliner.jpg');
+  expect(body.get('script')).toBe('Meet my eyeliner.');
+});
+
+test('createJob omits a blank script', async () => {
+  const calls: Array<{ init: RequestInit }> = [];
+  const fakeFetch = async (_url: string | URL, init?: RequestInit) => {
+    calls.push({ init: init ?? {} });
+    return new Response(JSON.stringify({ id: 'job-3', status: 'pending' }), { status: 201 });
+  };
+
+  await createJob(
+    { youtubeUrl: 'https://youtube.com/watch?v=abc', characterImage: fakeFile('char.png'), script: '   ' },
+    { fetchFn: fakeFetch as typeof fetch },
+  );
+
+  expect((calls[0].init.body as FormData).get('script')).toBeNull();
 });
 
 test('createJob throws the server error message on a non-ok response', async () => {
@@ -50,7 +73,7 @@ test('createJob throws the server error message on a non-ok response', async () 
     new Response(JSON.stringify({ error: 'youtubeUrl is required' }), { status: 400 });
 
   await expect(
-    createJob('', fakeFile('char.png'), null, { fetchFn: fakeFetch as typeof fetch }),
+    createJob({ youtubeUrl: '', characterImage: fakeFile('char.png') }, { fetchFn: fakeFetch as typeof fetch }),
   ).rejects.toThrow(/youtubeUrl is required/);
 });
 
@@ -79,9 +102,10 @@ test('createJob throws a friendly connection error when fetchFn itself fails', a
   };
 
   await expect(
-    createJob('https://youtube.com/watch?v=abc', fakeFile('char.png'), null, {
-      fetchFn: fakeFetch as unknown as typeof fetch,
-    }),
+    createJob(
+      { youtubeUrl: 'https://youtube.com/watch?v=abc', characterImage: fakeFile('char.png') },
+      { fetchFn: fakeFetch as unknown as typeof fetch },
+    ),
   ).rejects.toThrow(/워커 서버에 연결할 수 없습니다/);
 });
 
