@@ -3,6 +3,7 @@ import { downloadVideo as defaultDownloadVideo } from './download.js';
 import { splitIntoSegments as defaultSplitIntoSegments } from './segment.js';
 import { generateFromSegment as defaultGenerateFromSegment } from './generate.js';
 import { mergeSegments as defaultMergeSegments } from './merge.js';
+import { editVideo as defaultEditVideo } from './edit.js';
 import {
   synthesizeSpeech as defaultSynthesizeSpeech,
   muxVoiceover as defaultMuxVoiceover,
@@ -68,7 +69,7 @@ export async function runJob(db, jobId, workDir, deps = {}) {
     const finalPath = path.join(workDir, 'final.mp4');
     await mergeSegments(resultPaths, finalPath);
 
-    const resultPath = await applyVoiceover(db, jobId, workDir, finalPath, deps);
+    const resultPath = await finishVideo(db, jobId, workDir, finalPath, deps);
     await updateJob(db, jobId, { status: 'done', resultPath });
     return { resultPath };
   } catch (error) {
@@ -127,24 +128,35 @@ async function maybeFinishJob(db, jobId, workDir, deps) {
   const finalPath = path.join(workDir, 'final.mp4');
   await updateJob(db, jobId, { status: 'merging' });
   await deps.mergeSegments(resultPaths, finalPath);
-  const resultPath = await applyVoiceover(db, jobId, workDir, finalPath, deps);
+  const resultPath = await finishVideo(db, jobId, workDir, finalPath, deps);
   await updateJob(db, jobId, { status: 'done', resultPath });
 }
 
-// Optional last stage: when the job carries a script, narrate it over the merged
-// video. Without a script the merged file is the result, unchanged.
-async function applyVoiceover(db, jobId, workDir, mergedPath, deps = {}) {
+// Optional last stages over the merged video, in this order: a prompt-driven
+// edit (which re-renders the picture, so it must come first), then the
+// narration. A job with neither returns the merged file unchanged.
+async function finishVideo(db, jobId, workDir, mergedPath, deps = {}) {
   const job = await getJob(db, jobId);
-  if (!job.script) {
-    return mergedPath;
-  }
-  const synthesizeSpeech = deps.synthesizeSpeech ?? defaultSynthesizeSpeech;
-  const muxVoiceover = deps.muxVoiceover ?? defaultMuxVoiceover;
+  let currentPath = mergedPath;
 
-  await updateJob(db, jobId, { status: 'voiceover' });
-  const audioPath = path.join(workDir, 'voiceover.mp3');
-  await synthesizeSpeech(job.script, audioPath);
-  const voicedPath = path.join(workDir, 'final-voiced.mp4');
-  await muxVoiceover(mergedPath, audioPath, voicedPath);
-  return voicedPath;
+  if (job.editPrompt) {
+    const editVideo = deps.editVideo ?? defaultEditVideo;
+    await updateJob(db, jobId, { status: 'editing' });
+    const editedPath = path.join(workDir, 'final-edited.mp4');
+    await editVideo(currentPath, job.editPrompt, editedPath);
+    currentPath = editedPath;
+  }
+
+  if (job.script) {
+    const synthesizeSpeech = deps.synthesizeSpeech ?? defaultSynthesizeSpeech;
+    const muxVoiceover = deps.muxVoiceover ?? defaultMuxVoiceover;
+    await updateJob(db, jobId, { status: 'voiceover' });
+    const audioPath = path.join(workDir, 'voiceover.mp3');
+    await synthesizeSpeech(job.script, audioPath);
+    const voicedPath = path.join(workDir, 'final-voiced.mp4');
+    await muxVoiceover(currentPath, audioPath, voicedPath);
+    currentPath = voicedPath;
+  }
+
+  return currentPath;
 }

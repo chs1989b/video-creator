@@ -99,6 +99,26 @@ test('POST /jobs stores a trimmed script and treats a blank one as absent', asyn
   }
 });
 
+test('POST /jobs stores an optional editPrompt', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const form = new FormData();
+    form.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    form.append('characterImages', new Blob([new Uint8Array([1])]), 'char.png');
+    form.append('editPrompt', ' Warmer lighting ');
+    const created = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form })).json();
+    assert.equal(created.editPrompt, 'Warmer lighting');
+
+    const without = new FormData();
+    without.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    without.append('characterImages', new Blob([new Uint8Array([1])]), 'char.png');
+    const createdWithout = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: without })).json();
+    assert.equal(createdWithout.editPrompt, null);
+  } finally {
+    server.close();
+  }
+});
+
 test('POST /jobs without productImages records an empty productImagePaths list', async () => {
   const { server, baseUrl } = await startTestServer();
   try {

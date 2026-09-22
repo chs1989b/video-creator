@@ -18,7 +18,7 @@ import { execFile as defaultExecFile } from './exec.js';
 // hf_mult_motion_control nor ad_multiplier has been separately characterized,
 // but all three are Higgsfield-hosted jobs of similar shape, so the same
 // bound is used until real data says otherwise.)
-const GENERATE_TIMEOUT_MS = 40 * 60 * 1000;
+export const GENERATE_TIMEOUT_MS = 40 * 60 * 1000;
 
 // Switched from hf_mult_motion_control to ad_multiplier 2026-09-21: real
 // testing (docs/higgsfield-cli-notes.md) traced the "ip_detected" rejections
@@ -116,7 +116,7 @@ export async function generateFromSegment(
 // genuinely still going, so we leave it and surface the original error).
 const TERMINAL_STATUSES = ['completed', 'failed', 'nsfw', 'ip_detected'];
 
-async function recoverTimedOutJob(startedAt, execFile) {
+export async function recoverTimedOutJob(startedAt, execFile) {
   const { stdout } = await execFile('higgsfield', ['generate', 'list', '--json']);
   const jobs = JSON.parse(stdout);
   const candidate = jobs.find((j) => new Date(j.created_at) >= startedAt);

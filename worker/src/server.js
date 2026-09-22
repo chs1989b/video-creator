@@ -8,6 +8,10 @@ import { randomUUID } from 'node:crypto';
 import { createDb, createJob, getJob, listJobs } from './pipeline/db.js';
 import { runJob as defaultRunJob, retrySegment as defaultRetrySegment } from './pipeline/jobRunner.js';
 
+function optionalText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defaultRetrySegment }) {
   const app = express();
   app.use(cors());
@@ -45,8 +49,11 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
     const id = randomUUID();
     const characterImagePaths = characterFiles.map((file) => file.path);
     const productImagePaths = (req.files?.productImages ?? []).map((file) => file.path);
-    const script = typeof req.body.script === 'string' && req.body.script.trim() ? req.body.script.trim() : null;
-    const job = await createJob(db, { id, youtubeUrl, characterImagePaths, productImagePaths, script });
+    const script = optionalText(req.body.script);
+    const editPrompt = optionalText(req.body.editPrompt);
+    const job = await createJob(db, {
+      id, youtubeUrl, characterImagePaths, productImagePaths, script, editPrompt,
+    });
 
     const workDir = path.join(dataDir, 'jobs', id);
     await fs.mkdir(workDir, { recursive: true });

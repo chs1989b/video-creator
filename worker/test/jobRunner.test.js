@@ -87,6 +87,47 @@ test('runJob narrates the merged video when the job has a script and returns the
   assert.equal(job.resultPath, path.join(tmpDir, 'final-voiced.mp4'));
 });
 
+test('runJob applies the prompt edit before the voice-over and narrates the edited video', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jobrunner-test-'));
+  const db = createDb(path.join(tmpDir, 'db.json'));
+  await createJob(db, {
+    id: 'job-edited',
+    youtubeUrl: 'https://youtube.com/watch?v=abc',
+    characterImagePaths: ['/tmp/char.png'],
+    script: 'Narration.',
+    editPrompt: 'Make the lighting warmer.',
+  });
+
+  const order = [];
+  const deps = {
+    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
+    splitIntoSegments: async () => [{ index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 }],
+    generateFromSegment: async (_s, _c, outputPath) => ({ outputPath }),
+    mergeSegments: async (_p, outputPath) => ({ outputPath }),
+    editVideo: async (videoPath, prompt, outputPath) => {
+      order.push(['edit', videoPath, prompt, outputPath]);
+      return { outputPath };
+    },
+    synthesizeSpeech: async (_script, outputPath) => {
+      order.push(['tts', outputPath]);
+      return { outputPath };
+    },
+    muxVoiceover: async (videoPath, _audio, outputPath) => {
+      order.push(['mux', videoPath, outputPath]);
+      return { outputPath };
+    },
+  };
+
+  const result = await runJob(db, 'job-edited', tmpDir, deps);
+
+  assert.deepEqual(order, [
+    ['edit', path.join(tmpDir, 'final.mp4'), 'Make the lighting warmer.', path.join(tmpDir, 'final-edited.mp4')],
+    ['tts', path.join(tmpDir, 'voiceover.mp3')],
+    ['mux', path.join(tmpDir, 'final-edited.mp4'), path.join(tmpDir, 'final-voiced.mp4')],
+  ]);
+  assert.equal(result.resultPath, path.join(tmpDir, 'final-voiced.mp4'));
+});
+
 test('runJob skips the voice-over stage entirely when the job has no script', async () => {
   const { db, tmpDir } = await setup();
   const deps = {
@@ -94,6 +135,9 @@ test('runJob skips the voice-over stage entirely when the job has no script', as
     splitIntoSegments: async () => [{ index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 }],
     generateFromSegment: async (_segmentPath, _chars, outputPath) => ({ outputPath }),
     mergeSegments: async (_paths, outputPath) => ({ outputPath }),
+    editVideo: async () => {
+      throw new Error('should not be called');
+    },
     synthesizeSpeech: async () => {
       throw new Error('should not be called');
     },
