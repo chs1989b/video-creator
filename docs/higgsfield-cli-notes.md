@@ -240,4 +240,17 @@ ffmpeg -y -i final.mp4 -i voiceover.mp3 -map 0:v -map 1:a -c:v copy -c:a aac -af
 ```
 `apad`+`-shortest` 조합으로 음성이 짧으면 무음 패딩, 길면 영상 길이에서 잘림 → 영상 길이 불변. 결과 `worker/data/test-ad_multiplier-pexels8143138-aiface-eyeliner-voiced-20260923.mp4`. 이 두 명령이 그대로 `worker/src/pipeline/voiceover.js`에 들어감.
 
+## 2026-09-23 — 프롬프트 영상 편집 모델 비교 (4단계)
+
+`generate cost`(무료)로 같은 10초 영상 기준 비교: `flux_3_video_edit` 15, `kling_video_edit` std 15 / pro 20, `gemini_omni_flash_1_1 --mode edit` 30, `ad_multiplier --mode video_edit`(프롬프트만) 70, `seedance_2_5 --mode video_edit` 75.
+
+- **`kling_video_edit --mode std`**: 2단계 결과 영상(재업로드 id `661cf181`) + 조명 보정 프롬프트 → 약 1분 뒤 `failed`, 사유 없음. 13.5 spend → 13.5 refund(실비용 0). `generate get` 응답에도 실패 이유 필드 없음.
+- **`flux_3_video_edit`**: 같은 입력·프롬프트 → 약 1분 뒤 `completed`, **실차감 9.71**(조회값 15보다 적음). 결과 1280x672, 9.7초, 비디오만. 골든아워 조명이 자연스럽게 얹히고 인물·제품·동작·배경 유지. → 워커 `edit.js`는 FLUX로 확정.
+
+```bash
+higgsfield generate create flux_3_video_edit --prompt "<보정 지시>" --video-references <video-path-or-id> --wait --json
+```
+
+**비용 실측 vs 조회값**: TTS(`text2speech_v2`) 조회 0.3 → 실차감 0.45("Voiceover" 항목), FLUX 편집 조회 15 → 실차감 9.71. `generate cost`는 대략치로만 볼 것; 실제 금액은 `account transactions`.
+
 **교훈(9/22)**: 업로드가 느린 환경에서는 워커의 파일 경로 전달 방식이 취약함. 대안으로 (a) 워커가 `upload create`로 먼저 올리고 ID로 `generate create`를 호출하도록 분리하면 실패 지점을 좁히고 재시도도 단계별로 할 수 있음, (b) 세그먼트 파일 크기 축소. 둘 다 아직 미구현 — 안정 네트워크에서 현 코드로 먼저 성공을 확인한 뒤 판단.
