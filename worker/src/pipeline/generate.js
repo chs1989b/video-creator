@@ -41,17 +41,30 @@ const FACE_SWAP_PROMPT =
   'Replace the person in the video with the person from the reference image. '
   + 'Keep the original motion, framing, lighting, and background unchanged.';
 
+// Reference images are sent in argument order (character first, product
+// second), and the prompt refers to them by that order.
+const FACE_AND_PRODUCT_SWAP_PROMPT =
+  'Replace the person in the video with the person from the first reference image, '
+  + 'and replace the product they are holding with the product from the second reference image. '
+  + 'Keep the original motion, framing, lighting, and background unchanged.';
+
 export async function generateFromSegment(
   segmentPath,
   characterImagePath,
   outputPath,
-  { execFile = defaultExecFile } = {},
+  { execFile = defaultExecFile, productImagePath } = {},
 ) {
   const mutedSegmentPath = path.join(
     path.dirname(segmentPath),
     `muted-${path.basename(segmentPath)}`,
   );
   await execFile('ffmpeg', ['-y', '-i', segmentPath, '-an', '-c:v', 'copy', mutedSegmentPath]);
+
+  const imageArgs = ['--image-references', characterImagePath];
+  if (productImagePath) {
+    imageArgs.push('--image-references', productImagePath);
+  }
+  const prompt = productImagePath ? FACE_AND_PRODUCT_SWAP_PROMPT : FACE_SWAP_PROMPT;
 
   const startedAt = new Date();
   let job;
@@ -61,9 +74,9 @@ export async function generateFromSegment(
       [
         'generate', 'create', 'ad_multiplier',
         '--mode', 'video_edit',
-        '--prompt', FACE_SWAP_PROMPT,
+        '--prompt', prompt,
         '--video-references', mutedSegmentPath,
-        '--image-references', characterImagePath,
+        ...imageArgs,
         '--wait', '--json',
       ],
       { timeout: GENERATE_TIMEOUT_MS },

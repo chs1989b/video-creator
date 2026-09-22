@@ -59,6 +59,40 @@ test('POST /jobs saves the uploaded character image with its original extension'
   }
 });
 
+test('POST /jobs accepts an optional productImages file and records its path', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const form = new FormData();
+    form.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    form.append('characterImages', new Blob([new Uint8Array([1, 2, 3])]), 'char.png');
+    form.append('productImages', new Blob([new Uint8Array([4, 5, 6])]), 'eyeliner.jpg');
+
+    const createRes = await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form });
+    assert.equal(createRes.status, 201);
+    const created = await createRes.json();
+    assert.equal(created.characterImagePaths.length, 1);
+    assert.equal(created.productImagePaths.length, 1);
+    assert.match(created.productImagePaths[0], /\.jpg$/);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /jobs without productImages records an empty productImagePaths list', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const form = new FormData();
+    form.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    form.append('characterImages', new Blob([new Uint8Array([1, 2, 3])]), 'char.png');
+
+    const createRes = await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form });
+    const created = await createRes.json();
+    assert.deepEqual(created.productImagePaths, []);
+  } finally {
+    server.close();
+  }
+});
+
 test('POST /jobs without youtubeUrl returns 400', async () => {
   const { server, baseUrl } = await startTestServer();
   try {

@@ -25,20 +25,27 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
   });
   const upload = multer({ storage });
 
-  app.post('/jobs', upload.array('characterImages', 1), async (req, res) => {
+  const jobUploads = upload.fields([
+    { name: 'characterImages', maxCount: 1 },
+    { name: 'productImages', maxCount: 1 },
+  ]);
+
+  app.post('/jobs', jobUploads, async (req, res) => {
     const { youtubeUrl } = req.body;
     if (!youtubeUrl) {
       res.status(400).json({ error: 'youtubeUrl is required' });
       return;
     }
-    if (!req.files || req.files.length !== 1) {
+    const characterFiles = req.files?.characterImages ?? [];
+    if (characterFiles.length !== 1) {
       res.status(400).json({ error: 'exactly one characterImages file is required' });
       return;
     }
 
     const id = randomUUID();
-    const characterImagePaths = (req.files ?? []).map((file) => file.path);
-    const job = await createJob(db, { id, youtubeUrl, characterImagePaths });
+    const characterImagePaths = characterFiles.map((file) => file.path);
+    const productImagePaths = (req.files?.productImages ?? []).map((file) => file.path);
+    const job = await createJob(db, { id, youtubeUrl, characterImagePaths, productImagePaths });
 
     const workDir = path.join(dataDir, 'jobs', id);
     await fs.mkdir(workDir, { recursive: true });

@@ -41,7 +41,9 @@ export async function runJob(db, jobId, workDir, deps = {}) {
     for (const segment of segments) {
       const outputPath = path.join(workDir, `generated-${segment.index}.mp4`);
       try {
-        await generateFromSegment(segment.path, job.characterImagePaths[0], outputPath);
+        await generateFromSegment(segment.path, job.characterImagePaths[0], outputPath, {
+          productImagePath: job.productImagePaths?.[0],
+        });
         resultPaths.push(outputPath);
         await setSegmentStatus(db, jobId, segment.index, 'done', outputPath);
       } catch (error) {
@@ -87,7 +89,9 @@ export async function retrySegment(db, jobId, segmentIndex, workDir, deps = {}) 
 
   const outputPath = path.join(workDir, `generated-${segmentIndex}.mp4`);
   try {
-    await generateFromSegment(segment.path, job.characterImagePaths[0], outputPath);
+    await generateFromSegment(segment.path, job.characterImagePaths[0], outputPath, {
+      productImagePath: job.productImagePaths?.[0],
+    });
     await setSegmentStatus(db, jobId, segmentIndex, 'done', outputPath);
   } catch (error) {
     await setSegmentStatus(db, jobId, segmentIndex, 'failed', null, error.message);

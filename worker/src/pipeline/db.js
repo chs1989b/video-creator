@@ -19,7 +19,7 @@ function serialize(fn) {
   return result;
 }
 
-export async function createJob(db, { id, youtubeUrl, characterImagePaths }) {
+export async function createJob(db, { id, youtubeUrl, characterImagePaths, productImagePaths = [] }) {
   return serialize(async () => {
     await db.read();
     db.data ||= { jobs: [] };
@@ -28,6 +28,7 @@ export async function createJob(db, { id, youtubeUrl, characterImagePaths }) {
       id,
       youtubeUrl,
       characterImagePaths,
+      productImagePaths,
       status: 'pending',
       segments: [],
       resultPath: null,

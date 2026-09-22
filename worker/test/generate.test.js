@@ -59,6 +59,54 @@ test('generateFromSegment mutes the segment, calls the Higgsfield CLI model, the
   assert.equal(result.outputPath, '/tmp/job1/generated-0.mp4');
 });
 
+test('generateFromSegment adds the product image as a second reference and asks for the product swap', async () => {
+  const calls = [];
+  const fakeExecFile = async (command, args) => {
+    calls.push({ command, args });
+    if (command === 'higgsfield') {
+      return {
+        stdout: JSON.stringify([{ id: 'job-789', status: 'completed', result_url: 'https://example.com/r.mp4' }]),
+        stderr: '',
+      };
+    }
+    return { stdout: '', stderr: '' };
+  };
+
+  await generateFromSegment(
+    '/tmp/job1/segment-000.mp4',
+    '/tmp/job1/char1.png',
+    '/tmp/job1/generated-0.mp4',
+    { execFile: fakeExecFile, productImagePath: '/tmp/job1/product.png' },
+  );
+
+  const args = calls[1].args;
+  const imageRefs = args.flatMap((a, i) => (a === '--image-references' ? [args[i + 1]] : []));
+  assert.deepEqual(imageRefs, ['/tmp/job1/char1.png', '/tmp/job1/product.png']);
+  const prompt = args[args.indexOf('--prompt') + 1];
+  assert.match(prompt, /first reference image/);
+  assert.match(prompt, /product .* second reference image/);
+});
+
+test('generateFromSegment sends only the character image when no product image is given', async () => {
+  const calls = [];
+  const fakeExecFile = async (command, args) => {
+    calls.push({ command, args });
+    if (command === 'higgsfield') {
+      return {
+        stdout: JSON.stringify([{ id: 'job-790', status: 'completed', result_url: 'https://example.com/r.mp4' }]),
+        stderr: '',
+      };
+    }
+    return { stdout: '', stderr: '' };
+  };
+
+  await generateFromSegment('/tmp/a.mp4', '/tmp/char.png', '/tmp/out.mp4', { execFile: fakeExecFile });
+
+  const args = calls[1].args;
+  assert.equal(args.filter((a) => a === '--image-references').length, 1);
+  assert.doesNotMatch(args[args.indexOf('--prompt') + 1], /product/);
+});
+
 test('generateFromSegment throws a clear error when the job has no result_url', async () => {
   const fakeExecFile = async (command) => {
     if (command === 'higgsfield') {
