@@ -45,7 +45,8 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
     const id = randomUUID();
     const characterImagePaths = characterFiles.map((file) => file.path);
     const productImagePaths = (req.files?.productImages ?? []).map((file) => file.path);
-    const job = await createJob(db, { id, youtubeUrl, characterImagePaths, productImagePaths });
+    const script = typeof req.body.script === 'string' && req.body.script.trim() ? req.body.script.trim() : null;
+    const job = await createJob(db, { id, youtubeUrl, characterImagePaths, productImagePaths, script });
 
     const workDir = path.join(dataDir, 'jobs', id);
     await fs.mkdir(workDir, { recursive: true });

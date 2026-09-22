@@ -78,6 +78,27 @@ test('POST /jobs accepts an optional productImages file and records its path', a
   }
 });
 
+test('POST /jobs stores a trimmed script and treats a blank one as absent', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const withScript = new FormData();
+    withScript.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    withScript.append('characterImages', new Blob([new Uint8Array([1])]), 'char.png');
+    withScript.append('script', '  Hello, this is my eyeliner.  ');
+    const created = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: withScript })).json();
+    assert.equal(created.script, 'Hello, this is my eyeliner.');
+
+    const blank = new FormData();
+    blank.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    blank.append('characterImages', new Blob([new Uint8Array([1])]), 'char.png');
+    blank.append('script', '   ');
+    const createdBlank = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: blank })).json();
+    assert.equal(createdBlank.script, null);
+  } finally {
+    server.close();
+  }
+});
+
 test('POST /jobs without productImages records an empty productImagePaths list', async () => {
   const { server, baseUrl } = await startTestServer();
   try {

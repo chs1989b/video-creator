@@ -3,6 +3,10 @@ import { downloadVideo as defaultDownloadVideo } from './download.js';
 import { splitIntoSegments as defaultSplitIntoSegments } from './segment.js';
 import { generateFromSegment as defaultGenerateFromSegment } from './generate.js';
 import { mergeSegments as defaultMergeSegments } from './merge.js';
+import {
+  synthesizeSpeech as defaultSynthesizeSpeech,
+  muxVoiceover as defaultMuxVoiceover,
+} from './voiceover.js';
 import { getJob, updateJob } from './db.js';
 
 async function setSegmentStatus(db, jobId, index, status, resultPath, error) {
@@ -64,8 +68,9 @@ export async function runJob(db, jobId, workDir, deps = {}) {
     const finalPath = path.join(workDir, 'final.mp4');
     await mergeSegments(resultPaths, finalPath);
 
-    await updateJob(db, jobId, { status: 'done', resultPath: finalPath });
-    return { resultPath: finalPath };
+    const resultPath = await applyVoiceover(db, jobId, workDir, finalPath, deps);
+    await updateJob(db, jobId, { status: 'done', resultPath });
+    return { resultPath };
   } catch (error) {
     // Persist failure regardless of which stage threw (download/segment/generate/merge),
     // so GET /jobs/:id never shows a job stuck forever in an in-progress status.
@@ -103,12 +108,12 @@ export async function retrySegment(db, jobId, segmentIndex, workDir, deps = {}) 
   // own). Once every segment is done, merge immediately so resultPath gets
   // set and GET /jobs/:id/result stops 404ing; if segments are still
   // failed/pending, leave the job as-is until they're retried too.
-  await maybeFinishJob(db, jobId, workDir, { mergeSegments });
+  await maybeFinishJob(db, jobId, workDir, { ...deps, mergeSegments });
 
   return { outputPath };
 }
 
-async function maybeFinishJob(db, jobId, workDir, { mergeSegments }) {
+async function maybeFinishJob(db, jobId, workDir, deps) {
   const job = await getJob(db, jobId);
   const allDone = job.segments.length > 0 && job.segments.every((s) => s.status === 'done');
   if (!allDone) {
@@ -120,6 +125,26 @@ async function maybeFinishJob(db, jobId, workDir, { mergeSegments }) {
     .map((s) => s.resultPath);
 
   const finalPath = path.join(workDir, 'final.mp4');
-  await mergeSegments(resultPaths, finalPath);
-  await updateJob(db, jobId, { status: 'done', resultPath: finalPath });
+  await updateJob(db, jobId, { status: 'merging' });
+  await deps.mergeSegments(resultPaths, finalPath);
+  const resultPath = await applyVoiceover(db, jobId, workDir, finalPath, deps);
+  await updateJob(db, jobId, { status: 'done', resultPath });
+}
+
+// Optional last stage: when the job carries a script, narrate it over the merged
+// video. Without a script the merged file is the result, unchanged.
+async function applyVoiceover(db, jobId, workDir, mergedPath, deps = {}) {
+  const job = await getJob(db, jobId);
+  if (!job.script) {
+    return mergedPath;
+  }
+  const synthesizeSpeech = deps.synthesizeSpeech ?? defaultSynthesizeSpeech;
+  const muxVoiceover = deps.muxVoiceover ?? defaultMuxVoiceover;
+
+  await updateJob(db, jobId, { status: 'voiceover' });
+  const audioPath = path.join(workDir, 'voiceover.mp3');
+  await synthesizeSpeech(job.script, audioPath);
+  const voicedPath = path.join(workDir, 'final-voiced.mp4');
+  await muxVoiceover(mergedPath, audioPath, voicedPath);
+  return voicedPath;
 }

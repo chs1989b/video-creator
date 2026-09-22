@@ -42,6 +42,70 @@ test('runJob walks the full pipeline and marks the job done', async () => {
   assert.equal(job.segments[1].status, 'done');
 });
 
+test('runJob narrates the merged video when the job has a script and returns the voiced file', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jobrunner-test-'));
+  const db = createDb(path.join(tmpDir, 'db.json'));
+  await createJob(db, {
+    id: 'job-voiced',
+    youtubeUrl: 'https://youtube.com/watch?v=abc',
+    characterImagePaths: ['/tmp/char.png'],
+    script: 'Hi everyone, meet my favorite eyeliner.',
+  });
+
+  const ttsCalls = [];
+  const muxCalls = [];
+  const deps = {
+    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
+    splitIntoSegments: async () => [{ index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 }],
+    generateFromSegment: async (_segmentPath, _chars, outputPath) => ({ outputPath }),
+    mergeSegments: async (_paths, outputPath) => ({ outputPath }),
+    synthesizeSpeech: async (script, outputPath) => {
+      ttsCalls.push({ script, outputPath });
+      return { outputPath };
+    },
+    muxVoiceover: async (videoPath, audioPath, outputPath) => {
+      muxCalls.push({ videoPath, audioPath, outputPath });
+      return { outputPath };
+    },
+  };
+
+  const result = await runJob(db, 'job-voiced', tmpDir, deps);
+
+  assert.deepEqual(ttsCalls, [
+    { script: 'Hi everyone, meet my favorite eyeliner.', outputPath: path.join(tmpDir, 'voiceover.mp3') },
+  ]);
+  assert.deepEqual(muxCalls, [
+    {
+      videoPath: path.join(tmpDir, 'final.mp4'),
+      audioPath: path.join(tmpDir, 'voiceover.mp3'),
+      outputPath: path.join(tmpDir, 'final-voiced.mp4'),
+    },
+  ]);
+  assert.equal(result.resultPath, path.join(tmpDir, 'final-voiced.mp4'));
+  const job = await getJob(db, 'job-voiced');
+  assert.equal(job.status, 'done');
+  assert.equal(job.resultPath, path.join(tmpDir, 'final-voiced.mp4'));
+});
+
+test('runJob skips the voice-over stage entirely when the job has no script', async () => {
+  const { db, tmpDir } = await setup();
+  const deps = {
+    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
+    splitIntoSegments: async () => [{ index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 }],
+    generateFromSegment: async (_segmentPath, _chars, outputPath) => ({ outputPath }),
+    mergeSegments: async (_paths, outputPath) => ({ outputPath }),
+    synthesizeSpeech: async () => {
+      throw new Error('should not be called');
+    },
+    muxVoiceover: async () => {
+      throw new Error('should not be called');
+    },
+  };
+
+  const result = await runJob(db, 'job-1', tmpDir, deps);
+  assert.equal(result.resultPath, path.join(tmpDir, 'final.mp4'));
+});
+
 test('runJob marks the failing segment and the job itself as failed, and stops before merging', async () => {
   const { db, tmpDir } = await setup();
 
