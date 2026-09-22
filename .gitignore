@@ -5,3 +5,13 @@ node_modules/
 *.log
 .worktrees/
 .superpowers/
+
+# bkit plugin state
+.bkit/
+docs/.bkit-memory.json
+docs/.pdca-status.json
+docs/.pdca-snapshots/
+
+# local scratch (terminal pastes, screenshots)
+/test.md
+/SCR-*.png
