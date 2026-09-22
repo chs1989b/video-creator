@@ -12,9 +12,18 @@ higgsfield workspace list      # 워크스페이스 ID 확인 (예: free plan, 1
 higgsfield workspace set <워크스페이스 ID>   # 필수 — 안 하면 대부분의 명령이 "No workspace selected" 에러
 ```
 
-## "Genjutsu"라는 이름의 워크플로우는 없음
+## "Genjutsu"라는 이름의 워크플로우는 없음 — ⚠️ 2026-09-21 정정: `workflow`가 아니라 `model`에 있었음
 
-`higgsfield workflow list` 결과에 "genjutsu"라는 이름은 존재하지 않았음. 대신 웹 UI에서 봤던 "모션을 가져와서 다른 캐릭터로 재구성" 기능은 CLI 워크플로우 **`kling3_0_motion_control`** ("Kling 3.0 Motion Control")로 확인됨.
+`higgsfield workflow list` 결과에 "genjutsu"라는 이름은 존재하지 않아서, 당시엔 웹 UI에서 봤던 "모션을 가져와서 다른 캐릭터로 재구성" 기능을 CLI 워크플로우 **`kling3_0_motion_control`** ("Kling 3.0 Motion Control")로 대체 확인하고 그걸로 파이프라인을 만들었음.
+
+**2026-09-21 정정**: `higgsfield model list --video`(= `workflow`가 아니라 `model` 명령)로 보면 **Genjutsu가 실제로 존재함** — 별도의 두 모델로:
+
+- `hf_mult_motion_control` — "Genjutsu" 표시, 원본 영상의 동작을 유지하며 인물(얼굴) 교체. 필수: `video_references` 정확히 1개, `image_references` 1개 이상. (`kling3_0_motion_control`과 파라미터 구조는 비슷하지만 별개 모델 — 어느 쪽이 더 나은지, NSFW 오탐 빈도가 다른지는 미검증)
+- `hf_mult_replace_object` — "Genjutsu" 표시, 원본 영상 속 물건/의상 교체. 파라미터 구조 동일.
+
+`model` 계열은 `workflow` 계열과 다른 CLI 서브커맨드를 씀: `higgsfield generate create <model> --mode ... --prompt "..." --video-references <path> --image-references <path> --wait` (참고: `higgsfield generate workflow <name> ...`가 아님). `higgsfield model get <job_type>`로 파라미터 확인 가능.
+
+같은 조사에서 **`ad_multiplier`**(Seedance 2.5 기반, "Ad Multiplier")도 `model list --video`에 있음을 확인함 — 소스 영상(4~30초)의 모션·구도·오디오를 유지하며 사람/제품/의상을 한 번에 교체하는 모델. `mode video_edit` 사용 시 영상 레퍼런스 정확히 1개 필요. `hf_mult_motion_control` + `hf_mult_replace_object` 조합과 기능이 겹치는 부분이 있어, 셋 중 어느 게 NSFW 오탐이 적고 결과 품질이 좋은지는 실제 테스트로 비교 필요 (아직 미실행 — 더미 프롬프트로는 `generate cost`도 안 되고 실제 파일이 있어야 함, 크레딧은 소모 안 됨/974.5 유지 확인).
 
 ## 실제 성공한(예정) 명령어 형태
 
@@ -127,3 +136,72 @@ Error: Cannot detect media type from extension "".
 **최종 조치**: 타임아웃을 **40분**으로 늘림. 진짜 hang은 45~60분+ 동안 네트워크 활동이 전혀 없는 것으로 확인됐고, 정상 생성은 20분 안팎까지 걸릴 수 있으므로, 40분이면 정상 생성엔 충분한 여유를 주면서 진짜 hang은 계속 잡아낼 수 있음.
 
 **교훈**: 이 CLI의 처리 시간 편차가 생각보다 크다 (몇 분 ~ 20분+). 타임아웃으로 인한 손실을 완전히 막으려면, 타임아웃으로 죽이기 전에 `higgsfield generate list`로 최근 job이 이미 완료됐는지 먼저 확인하는 안전장치를 추가하는 것도 고려할 만함 (현재는 구현 안 함, 향후 개선 후보).
+
+## ✅ CLI로 `ad_multiplier` / Genjutsu(`hf_mult_motion_control`, `hf_mult_replace_object`) 접근 확인 (2026-09-21)
+
+`higgsfield workflow list`에는 없지만 **`higgsfield model list --video`에는 있음** — 별도의 CLI 서브커맨드 체계.
+
+```bash
+higgsfield model get <job_type>              # 파라미터 확인
+higgsfield generate cost <job_type> --...    # 비용 조회 (무료, 실제 미디어 파일 필요 — 더미 프롬프트만으론 조회도 안 됨)
+higgsfield generate create <job_type> --mode ... --prompt "..." --video-references <path> --image-references <path> --json
+```
+
+- `hf_mult_motion_control` — "Genjutsu" 표시, 모션 유지 + 얼굴 교체. `video_references` 정확히 1개, `image_references` 1개 이상 필수.
+- `hf_mult_replace_object` — "Genjutsu" 표시, 물건/의상 교체. 파라미터 구조 동일.
+- `ad_multiplier` (Seedance 2.5 기반) — `mode video_edit`일 때 `prompt` 필수, `video_references` 정확히 1개.
+
+**비용**: 10초 세그먼트 기준 `hf_mult_motion_control`·`ad_multiplier` 둘 다 **70크레딧** — 기존에 쓰던 `kling3_0_motion_control`(10초=17크레딧)보다 약 4배 비쌈.
+
+## ⚠️ 새로운 차단 사유 발견: `"status": "ip_detected"` (크레딧은 환불됨, ~20초 지연) (2026-09-21)
+
+기존에 검증된 "본인 소유" 세그먼트(`segment0-paid-plan-success.mp4`, 10초) + 얼굴 샘플 이미지로 `ad_multiplier`(`mode: video_edit`)를 실제 실행했더니, NSFW가 아니라 **`"status": "ip_detected"`**로 거부됨. 소스 영상이나 레퍼런스 이미지의 어떤 요소(배경 음악, 브랜드/로고, 특정 인물과의 유사성 등)가 IP 감지 필터에 걸린 것으로 추정되나, API 응답에 구체적 사유는 나오지 않음. 같은 영상이 예전에 `kling3_0_motion_control`로는 통과했었다는 점에서, **모델(job_type)마다 콘텐츠 검열 기준이 다를 수 있음**을 시사함.
+
+**크레딧 처리 (최초엔 정정 필요했던 부분)**: `higgsfield workspace list`로 바로 확인했을 땐 70크레딧이 빠진 것처럼 보여서 처음엔 "ip_detected는 환불 안 됨"으로 기록했었으나, `higgsfield account transactions`로 원장을 보니 spend(-70) 후 **약 20초 뒤 refund(+70)가 자동으로 들어와 net 0**이었음. 즉 `nsfw`/`failed`와 마찬가지로 `ip_detected`도 결국 무료 — 다만 반영에 지연이 있으니, 실패 직후 바로 `workspace list`만 보고 "돈이 나갔다"고 단정하지 말고 몇 초 후 `account transactions`로 실제 spend/refund 쌍을 확인할 것.
+
+같은 조건(같은 영상+이미지)으로 병행 실행한 `hf_mult_motion_control`은 **정상 완료**(`status: completed`, 70크레딧 정상 차감, 결과 영상 `worker/data/test-hf_mult_motion_control-20260921.mp4`). 다만 이 세그먼트는 애초에 `kling3_0_motion_control`로도 통과했던 구간이라 NSFW 개선 여부를 증명하진 못함 — 아래 참고.
+
+## ✅ `ip_detected` 원인 규명: 배경 음악(오디오) 문제였음, 영상/얼굴 문제 아님 (2026-09-21)
+
+`ad_multiplier`(`mode: video_edit`)와 `hf_mult_motion_control`의 파라미터를 비교해보니 뚜렷한 차이가 하나 있었음: `hf_mult_motion_control`은 `generate_audio: false`로 오디오를 아예 처리하지 않는 반면, `ad_multiplier`의 `video_edit` 모드는 `generate_audio: true`로 원본 오디오를 그대로 분석·보존함. 같은 얼굴 이미지를 썼는데 오디오를 안 건드리는 쪽만 통과했다는 점에서 오디오(원본 영상의 배경 음악)가 원인일 가능성을 의심함.
+
+**검증**: 아까 `ip_detected`가 났던 것과 동일한 5.4초 구간에서 `ffmpeg -an`으로 오디오만 제거한 뒤 같은 `ad_multiplier` 호출을 다시 실행 → **`status: completed`, 38.03크레딧 정상 차감(환불 없음, 진짜 성공)**. 결과 영상: `worker/data/test-ad_multiplier-muted-20260921.mp4`.
+
+**결론**: `ip_detected`는 영상 내용이나 얼굴 이미지가 아니라 **원본 영상의 배경 음악(저작권 있는 트렌딩 음악일 가능성)** 때문이었음이 확인됨. `ad_multiplier`를 쓸 때는 **소스 영상의 오디오를 미리 제거(`ffmpeg -an`)하고 넣는 것을 표준 전처리로 삼을 것**. 이렇게 하면 `ad_multiplier` 한 번의 호출로 인물 교체 + 물건/의상 교체를 동시에 처리할 수 있어(Genjutsu 두 모델을 순차 호출하는 것보다 단순하고 비용도 절반), `hf_mult_motion_control` 단독 사용보다 이쪽이 최종 목표(얼굴+물건/의상 교체, 나중엔 음성/대본까지 교체)에 더 부합함 — 어차피 장기 목표가 원본 오디오를 새 목소리로 교체하는 것이므로 원본 오디오를 버리는 것 자체는 손해가 아님.
+
+## ✅ 진짜 NSFW 비교 테스트 결과: `hf_mult_motion_control`이 통과함 (2026-09-21)
+
+예전에 `kling3_0_motion_control`로 **2번 재시도 모두 `nsfw`로 거부됐던 동일한 5.4초 구간**(원본 15.433초 영상의 10~15.4초, `worker/data/jobs/d50722e3-.../source.mp4`에서 잘라냄 → `worker/data/test-nsfw-segment-10to15s.mp4`)을 같은 얼굴 이미지로 `hf_mult_motion_control`에 넣어 재시도함.
+
+**결과: `"status": "completed"`, 35크레딧 정상 차감(환불 없음), 실제 결과 영상 확보** (`worker/data/test-hf_mult_motion_control-nsfw-segment-20260921.mp4`).
+
+**의미**: 같은 콘텐츠가 `kling3_0_motion_control`에서는 일관되게 막혔는데 `hf_mult_motion_control`에서는 통과함 — 모델마다 콘텐츠 검열 기준이 실제로 다르다는 가설이 이 케이스에서는 확인됨. 다만 **표본 1개**이므로 일반화는 아직 이름. 결과 영상 품질(실제로 자연스러운지)은 육안 확인이 아직 안 됨 — 다음 단계로 확인 필요.
+
+**✅ 2026-09-21 완료 — 워커 코드 교체함.** 결과 영상 품질 육안 확인 후 사용자 승인받아 `worker/src/pipeline/generate.js`를 `kling3_0_motion_control`(`generate workflow`) → `hf_mult_motion_control`(`generate create`, `--mode std` 파라미터 없음)로 교체함. `TERMINAL_STATUSES`에 `ip_detected`도 추가(§ 위 참고 — 결국 무료지만 job 목록 조회 시 종결 상태로 인식은 되어야 함). 관련 테스트(`worker/test/generate.test.js`) 전부 수정 후 28개 테스트 통과 확인. 비용은 10초 기준 17→70크레딧으로 오름 — 실사용 시 크레딧 소모 속도 재계산 필요.
+
+## ✅ 2026-09-21 완료 — 2차 교체: `hf_mult_motion_control` → `ad_multiplier` + 오디오 제거 전처리
+
+위 "ip_detected 원인 규명" 섹션의 결론(배경 음악이 원인, `ffmpeg -an`으로 해소)에 따라 `worker/src/pipeline/generate.js`를 다시 교체함:
+
+- `generateFromSegment`이 이제 Higgsfield 호출 전에 `ffmpeg -y -i <segment> -an -c:v copy <muted-segment>`로 세그먼트를 먼저 음소거함 (원본 세그먼트 파일 자체는 그대로 두고, 같은 폴더에 `muted-` 접두사 붙은 별도 파일 생성).
+- Higgsfield 호출을 `hf_mult_motion_control`(`generate create hf_mult_motion_control --video-references ... --image-references ...`)에서 `ad_multiplier`(`generate create ad_multiplier --mode video_edit --prompt '' --video-references <muted-segment> --image-references ...`)로 교체.
+- **프롬프트는 반드시 1자 이상** (2026-09-22 E2E 실행에서 확인 — 처음엔 `--prompt ''`로 넣었다가 정정함): CLI는 `--prompt` 플래그가 없으면 `Missing required params: prompt`로 클라이언트에서 거부하고, 빈 문자열은 CLI는 통과하지만 **서버가 `Error: prompt: String should have at least 1 character`로 거부**함. 성공했던 9/21 잡(`9bfab71d-...`)이 `generate list`/`generate get`에서 `params.prompt: null`로 보이는 건 **API가 프롬프트를 되돌려주지 않기 때문**이지 빈 프롬프트였다는 뜻이 아님 — 그날 실제로 쓴 문구는 기록이 없어 복원 불가. 코드에는 자체 문구(`FACE_SWAP_PROMPT`, "레퍼런스 이미지의 인물로 교체, 모션·구도·조명·배경은 유지")를 상수로 넣어둠.
+- 관련 테스트(`worker/test/generate.test.js`) 전부 수정 — 모든 테스트에서 호출 순서가 `ffmpeg`(음소거) → `higgsfield` → `curl`로 하나 늘어남. 28개 테스트 통과 확인.
+- 워커 코드 경로로의 실제 성공은 아직 없음 — 아래 2026-09-22 E2E 시도 참고.
+
+## 2026-09-22 E2E 시도 — 네트워크로 워커 경로 실패, 미디어 ID 우회 생성은 성공
+
+**소재**: Pexels 8143138(화장품 리뷰, 17.04초, 오디오 없음, 무료 라이선스) + AI 생성 얼굴(`worker/data/face_sample/ai-generated-woman-20260922.jpg`). yt-dlp는 Pexels **페이지 URL은 Cloudflare 403**으로 실패하고, **CDN 직링크**(`https://videos.pexels.com/video-files/8143138/8143138-hd_1366_720_25fps.mp4`)는 generic 추출기로 정상 처리됨 — 워커 `youtubeUrl`에 직링크를 넣으면 다운로드 단계는 그대로 통과함.
+
+**워커 잡 `4dde39a7`**: 다운로드·분할·음소거는 정상. 생성 단계에서 `Error: request failed (no response received)` ×2, 재시도 2회도 동일. 진단:
+- 업로드 속도 측정 ~96KB/s (1MB POST에 10초). `higgsfield upload create`로 1MB 세그먼트는 25초 걸려 성공, 857KB PNG는 `Failed to upload media bytes`.
+- 업로드 목록을 보면 세그먼트 영상은 매번 올라갔고 **그 다음 요청(이미지 업로드 또는 create)에서 끊김**. Higgsfield 잡은 하나도 생성되지 않았고 크레딧 소모 없음.
+- CLI에 업로드/HTTP 타임아웃이나 재시도 옵션은 없음(`--wait-timeout`, `--wait-interval`은 wait 폴링용).
+
+**우회**: 이미 올라간 ID로 `higgsfield generate create ad_multiplier --mode video_edit --prompt "<FACE_SWAP_PROMPT>" --video-references <video-id> --image-references <image-id> --json` (`--wait` 없이) → 즉시 job id 반환, 약 24분 뒤 `completed`, **70크레딧 차감**(`account transactions`로 확인, 환불 없음). 결과 `worker/data/test-ad_multiplier-pexels8143138-aiface-20260922.mp4` (9.7초, 1322x696, 비디오 스트림만 — 소스에 오디오가 없었으므로 `generate_audio: true`여도 오디오 없음). 비교 프레임 `worker/data/source-2s.jpg` / `result-2s.jpg`.
+
+**품질**: 얼굴만이 아니라 인물 전체(머리 타월→머리카락, 상의→가운)가 레퍼런스 인물로 바뀌고, 손에 든 제품·손동작·욕실 배경·구도는 유지됨. "Replace the person…" 프롬프트대로 동작한 것으로, 인물 교체 목적엔 적합. 얼굴만 바꾸고 의상은 유지하고 싶다면 프롬프트를 "Replace only the face…" 식으로 바꿔 비교 필요(미테스트).
+
+**특이사항**: CLI는 create 즉시 job id를 돌려줬지만 서버 `created_at`은 약 20분 뒤(14:49Z)로 기록됨 — 큐 대기 후 시각이 찍히는 듯. `generate get`은 그 사이 빈 응답을 돌려줌. `recoverTimedOutJob`의 `created_at >= startedAt` 비교에는 영향 없음(더 늦은 시각).
+
+**교훈**: 업로드가 느린 환경에서는 워커의 파일 경로 전달 방식이 취약함. 대안으로 (a) 워커가 `upload create`로 먼저 올리고 ID로 `generate create`를 호출하도록 분리하면 실패 지점을 좁히고 재시도도 단계별로 할 수 있음, (b) 세그먼트 파일 크기 축소. 둘 다 아직 미구현 — 안정 네트워크에서 현 코드로 먼저 성공을 확인한 뒤 판단.
