@@ -204,4 +204,18 @@ higgsfield generate create <job_type> --mode ... --prompt "..." --video-referenc
 
 **특이사항**: CLI는 create 즉시 job id를 돌려줬지만 서버 `created_at`은 약 20분 뒤(14:49Z)로 기록됨 — 큐 대기 후 시각이 찍히는 듯. `generate get`은 그 사이 빈 응답을 돌려줌. `recoverTimedOutJob`의 `created_at >= startedAt` 비교에는 영향 없음(더 늦은 시각).
 
-**교훈**: 업로드가 느린 환경에서는 워커의 파일 경로 전달 방식이 취약함. 대안으로 (a) 워커가 `upload create`로 먼저 올리고 ID로 `generate create`를 호출하도록 분리하면 실패 지점을 좁히고 재시도도 단계별로 할 수 있음, (b) 세그먼트 파일 크기 축소. 둘 다 아직 미구현 — 안정 네트워크에서 현 코드로 먼저 성공을 확인한 뒤 판단.
+## ✅ 2026-09-23 — `ad_multiplier`로 인물 + 제품 동시 교체 성공 (2단계)
+
+같은 muted seg0(`b217472c`) + 같은 AI 얼굴(`413765c7`) + 아이라이너 사진(`0db232f3`, Pexels 7256089 크롭)을 `--image-references` 2개로 넘기고, 프롬프트에 "첫 레퍼런스 인물로 교체 + 들고 있는 제품을 두 번째 레퍼런스 제품으로 교체"를 명시:
+
+```bash
+higgsfield generate create ad_multiplier --mode video_edit \
+  --prompt "Replace the person in the video with the person from the first reference image, and replace the product they are holding with the product from the second reference image. Keep the original motion, framing, lighting, and background unchanged." \
+  --video-references <video-id> --image-references <person-id> --image-references <product-id> --json
+```
+
+- 결과 `completed`, **70크레딧** — 인물만 교체할 때와 동일. 제품 교체를 얹어도 추가 비용 없음. 생성 시간 약 3분(9/22의 24분보다 훨씬 빠름 — 큐 상황 차이로 추정).
+- 결과 `worker/data/test-ad_multiplier-pexels8143138-aiface-eyeliner-20260923.mp4`. 흰 병 → 검정 리퀴드 아이라이너 펜(펜촉 표현됨), 손가락 그립도 펜 모양에 맞게 바뀜, 인물·배경·동작은 9/22 결과와 동일하게 유지.
+- 레퍼런스 순서 = 인자 순서로 동작함(첫 `--image-references`가 "first reference image"). 제품 사진에 브랜드명이 있으면 `ip_detected` 위험이 있으니 무브랜드 사진을 쓰거나 로고를 잘라낼 것 — 첫 후보(Pexels 2693644, "venus" 각인)는 그래서 제외함.
+
+**교훈(9/22)**: 업로드가 느린 환경에서는 워커의 파일 경로 전달 방식이 취약함. 대안으로 (a) 워커가 `upload create`로 먼저 올리고 ID로 `generate create`를 호출하도록 분리하면 실패 지점을 좁히고 재시도도 단계별로 할 수 있음, (b) 세그먼트 파일 크기 축소. 둘 다 아직 미구현 — 안정 네트워크에서 현 코드로 먼저 성공을 확인한 뒤 판단.
