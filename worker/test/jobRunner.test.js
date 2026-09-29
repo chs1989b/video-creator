@@ -4,310 +4,231 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createDb, createJob, getJob } from '../src/pipeline/db.js';
-import { runJob, retrySegment } from '../src/pipeline/jobRunner.js';
+import { runJob, runStage, retrySegment, nextStage } from '../src/pipeline/jobRunner.js';
 
-async function setup() {
+async function setup(extra = {}) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jobrunner-test-'));
   const db = createDb(path.join(tmpDir, 'db.json'));
   await createJob(db, {
     id: 'job-1',
     youtubeUrl: 'https://youtube.com/watch?v=abc',
     characterImagePaths: ['/tmp/char.png'],
+    ...extra,
   });
   return { db, tmpDir };
 }
 
-test('runJob walks the full pipeline and marks the job done', async () => {
-  const { db, tmpDir } = await setup();
+const twoSegments = async () => [
+  { index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 },
+  { index: 1, path: '/tmp/segment-001.mp4', startSeconds: 10, endSeconds: 15 },
+];
 
-  const deps = {
+function happyDeps(overrides = {}) {
+  return {
     downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
-    splitIntoSegments: async () => [
-      { index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 },
-      { index: 1, path: '/tmp/segment-001.mp4', startSeconds: 10, endSeconds: 15 },
-    ],
-    generateFromSegment: async (segmentPath, _chars, outputPath) => ({ outputPath }),
-    mergeSegments: async (_paths, outputPath) => ({ outputPath }),
+    splitIntoSegments: twoSegments,
+    generateFromSegment: async (_s, _c, outputPath) => ({ outputPath }),
+    mergeSegments: async (_p, outputPath) => ({ outputPath }),
+    editVideo: async (_v, _p, outputPath) => ({ outputPath }),
+    synthesizeSpeech: async (_t, outputPath) => ({ outputPath }),
+    muxVoiceover: async (_v, _a, outputPath) => ({ outputPath }),
+    ...overrides,
   };
+}
+
+test('a new job starts idle with generate/merge pending and optional stages skipped', async () => {
+  const { db } = await setup({ script: 'Hi' });
+  const job = await getJob(db, 'job-1');
+  assert.equal(job.status, 'idle');
+  assert.equal(job.stages.generate.status, 'pending');
+  assert.equal(job.stages.merge.status, 'pending');
+  assert.equal(job.stages.restyle.status, 'skipped');
+  assert.equal(job.stages.edit.status, 'skipped');
+  assert.equal(job.stages.voiceover.status, 'pending');
+  assert.equal(nextStage(job), 'generate');
+});
+
+test('runJob walks every enabled stage in order and records each output', async () => {
+  const { db, tmpDir } = await setup({
+    script: 'Narration.',
+    restylePrompt: 'Beige shirt.',
+    editPrompt: 'Warmer light.',
+  });
+  const order = [];
+  const deps = happyDeps({
+    mergeSegments: async (paths, outputPath) => { order.push(['merge', paths.length]); return { outputPath }; },
+    editVideo: async (videoPath, prompt, outputPath) => { order.push(['edit', path.basename(videoPath), prompt]); return { outputPath }; },
+    muxVoiceover: async (videoPath, _a, outputPath) => { order.push(['mux', path.basename(videoPath)]); return { outputPath }; },
+  });
 
   const result = await runJob(db, 'job-1', tmpDir, deps);
 
-  assert.equal(result.resultPath, path.join(tmpDir, 'final.mp4'));
-
-  const job = await getJob(db, 'job-1');
-  assert.equal(job.status, 'done');
-  assert.equal(job.resultPath, path.join(tmpDir, 'final.mp4'));
-  assert.equal(job.segments.length, 2);
-  assert.equal(job.segments[0].status, 'done');
-  assert.equal(job.segments[1].status, 'done');
-});
-
-test('runJob narrates the merged video when the job has a script and returns the voiced file', async () => {
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jobrunner-test-'));
-  const db = createDb(path.join(tmpDir, 'db.json'));
-  await createJob(db, {
-    id: 'job-voiced',
-    youtubeUrl: 'https://youtube.com/watch?v=abc',
-    characterImagePaths: ['/tmp/char.png'],
-    script: 'Hi everyone, meet my favorite eyeliner.',
-  });
-
-  const ttsCalls = [];
-  const muxCalls = [];
-  const deps = {
-    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
-    splitIntoSegments: async () => [{ index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 }],
-    generateFromSegment: async (_segmentPath, _chars, outputPath) => ({ outputPath }),
-    mergeSegments: async (_paths, outputPath) => ({ outputPath }),
-    synthesizeSpeech: async (script, outputPath) => {
-      ttsCalls.push({ script, outputPath });
-      return { outputPath };
-    },
-    muxVoiceover: async (videoPath, audioPath, outputPath) => {
-      muxCalls.push({ videoPath, audioPath, outputPath });
-      return { outputPath };
-    },
-  };
-
-  const result = await runJob(db, 'job-voiced', tmpDir, deps);
-
-  assert.deepEqual(ttsCalls, [
-    { script: 'Hi everyone, meet my favorite eyeliner.', outputPath: path.join(tmpDir, 'voiceover.mp3') },
-  ]);
-  assert.deepEqual(muxCalls, [
-    {
-      videoPath: path.join(tmpDir, 'final.mp4'),
-      audioPath: path.join(tmpDir, 'voiceover.mp3'),
-      outputPath: path.join(tmpDir, 'final-voiced.mp4'),
-    },
+  assert.deepEqual(order, [
+    ['merge', 2],
+    ['edit', 'final.mp4', 'Beige shirt.'],
+    ['edit', 'final-restyled.mp4', 'Warmer light.'],
+    ['mux', 'final-edited.mp4'],
   ]);
   assert.equal(result.resultPath, path.join(tmpDir, 'final-voiced.mp4'));
-  const job = await getJob(db, 'job-voiced');
+  const job = await getJob(db, 'job-1');
+  assert.equal(job.status, 'done');
+  assert.equal(job.stages.generate.status, 'done');
+  assert.equal(job.stages.merge.outputPath, path.join(tmpDir, 'final.mp4'));
+  assert.equal(job.stages.restyle.outputPath, path.join(tmpDir, 'final-restyled.mp4'));
+  assert.equal(job.stages.edit.outputPath, path.join(tmpDir, 'final-edited.mp4'));
+  assert.equal(job.stages.voiceover.outputPath, path.join(tmpDir, 'final-voiced.mp4'));
+  assert.equal(job.error, null);
+});
+
+test('runJob with only the required stages ends at the merged file', async () => {
+  const { db, tmpDir } = await setup();
+  const result = await runJob(db, 'job-1', tmpDir, happyDeps({
+    editVideo: async () => { throw new Error('should not be called'); },
+    synthesizeSpeech: async () => { throw new Error('should not be called'); },
+  }));
+  assert.equal(result.resultPath, path.join(tmpDir, 'final.mp4'));
+});
+
+test('a failing segment marks the generate stage and the job failed, without merging', async () => {
+  const { db, tmpDir } = await setup();
+  const deps = happyDeps({
+    generateFromSegment: async (segmentPath, _c, outputPath) => {
+      if (segmentPath === '/tmp/segment-001.mp4') throw new Error('higgsfield call failed');
+      return { outputPath };
+    },
+    mergeSegments: async () => { throw new Error('should not be called'); },
+  });
+
+  await assert.rejects(runJob(db, 'job-1', tmpDir, deps), /1 segment\(s\) failed to generate/);
+
+  const job = await getJob(db, 'job-1');
+  assert.equal(job.status, 'failed');
+  assert.equal(job.currentStage, null);
+  assert.equal(job.stages.generate.status, 'failed');
+  assert.equal(job.segments[0].status, 'done');
+  assert.equal(job.segments[1].status, 'failed');
+  assert.equal(job.segments[1].error, 'higgsfield call failed');
+  assert.equal(job.stages.merge.status, 'pending');
+});
+
+test('resuming a failed job regenerates only the failed segment and continues to the end', async () => {
+  const { db, tmpDir } = await setup({ script: 'Hi' });
+  let calls = 0;
+  const flaky = happyDeps({
+    generateFromSegment: async (segmentPath, _c, outputPath) => {
+      calls += 1;
+      if (segmentPath === '/tmp/segment-001.mp4' && calls <= 2) throw new Error('boom');
+      return { outputPath };
+    },
+  });
+  await assert.rejects(runJob(db, 'job-1', tmpDir, flaky));
+  assert.equal(calls, 2);
+
+  const generated = [];
+  const resumed = happyDeps({
+    downloadVideo: async () => { throw new Error('must not download again'); },
+    splitIntoSegments: async () => { throw new Error('must not split again'); },
+    generateFromSegment: async (segmentPath, _c, outputPath) => { generated.push(segmentPath); return { outputPath }; },
+  });
+  const result = await runJob(db, 'job-1', tmpDir, resumed);
+
+  assert.deepEqual(generated, ['/tmp/segment-001.mp4'], 'the done segment is not billed again');
+  assert.equal(result.resultPath, path.join(tmpDir, 'final-voiced.mp4'));
+  const job = await getJob(db, 'job-1');
+  assert.equal(job.status, 'done');
+  assert.equal(job.error, null, 'the earlier failure message is cleared once the job completes');
+});
+
+test('a failure in a finishing stage leaves the job failed (never stuck running) and resumes from that stage', async () => {
+  const { db, tmpDir } = await setup({ restylePrompt: 'Beige.', editPrompt: 'Warm.' });
+  let editCalls = 0;
+  const deps = happyDeps({
+    editVideo: async (_v, prompt, outputPath) => {
+      editCalls += 1;
+      if (prompt === 'Warm.' && editCalls === 2) throw new Error('request failed (no response received)');
+      return { outputPath };
+    },
+  });
+
+  await assert.rejects(runJob(db, 'job-1', tmpDir, deps), /no response received/);
+  let job = await getJob(db, 'job-1');
+  assert.equal(job.status, 'failed');
+  assert.equal(job.stages.restyle.status, 'done');
+  assert.equal(job.stages.edit.status, 'failed');
+  assert.match(job.stages.edit.error, /no response received/);
+  assert.equal(nextStage(job), 'edit');
+
+  const result = await runJob(db, 'job-1', tmpDir, deps);
+  assert.equal(editCalls, 3, 'restyle was not re-rendered; only the edit ran again');
+  assert.equal(result.resultPath, path.join(tmpDir, 'final-edited.mp4'));
+  job = await getJob(db, 'job-1');
+  assert.equal(job.status, 'done');
+});
+
+test('runStage runs a single stage and leaves the job idle when more stages remain', async () => {
+  const { db, tmpDir } = await setup({ script: 'Hi' });
+  const deps = happyDeps();
+
+  await runStage(db, 'job-1', tmpDir, 'generate', deps);
+  let job = await getJob(db, 'job-1');
+  assert.equal(job.stages.generate.status, 'done');
+  assert.equal(job.status, 'idle');
+  assert.equal(job.resultPath, null);
+
+  await runStage(db, 'job-1', tmpDir, 'merge', deps);
+  job = await getJob(db, 'job-1');
+  assert.equal(job.stages.merge.status, 'done');
+  assert.equal(job.status, 'idle');
+
+  await runStage(db, 'job-1', tmpDir, 'voiceover', deps);
+  job = await getJob(db, 'job-1');
   assert.equal(job.status, 'done');
   assert.equal(job.resultPath, path.join(tmpDir, 'final-voiced.mp4'));
 });
 
-test('runJob applies the prompt edit before the voice-over and narrates the edited video', async () => {
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jobrunner-test-'));
-  const db = createDb(path.join(tmpDir, 'db.json'));
-  await createJob(db, {
-    id: 'job-edited',
-    youtubeUrl: 'https://youtube.com/watch?v=abc',
-    characterImagePaths: ['/tmp/char.png'],
-    script: 'Narration.',
-    editPrompt: 'Make the lighting warmer.',
-  });
-
-  const order = [];
-  const deps = {
-    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
-    splitIntoSegments: async () => [{ index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 }],
-    generateFromSegment: async (_s, _c, outputPath) => ({ outputPath }),
-    mergeSegments: async (_p, outputPath) => ({ outputPath }),
-    editVideo: async (videoPath, prompt, outputPath) => {
-      order.push(['edit', videoPath, prompt, outputPath]);
-      return { outputPath };
-    },
-    synthesizeSpeech: async (_script, outputPath) => {
-      order.push(['tts', outputPath]);
-      return { outputPath };
-    },
-    muxVoiceover: async (videoPath, _audio, outputPath) => {
-      order.push(['mux', videoPath, outputPath]);
-      return { outputPath };
-    },
-  };
-
-  const result = await runJob(db, 'job-edited', tmpDir, deps);
-
-  assert.deepEqual(order, [
-    ['edit', path.join(tmpDir, 'final.mp4'), 'Make the lighting warmer.', path.join(tmpDir, 'final-edited.mp4')],
-    ['tts', path.join(tmpDir, 'voiceover.mp3')],
-    ['mux', path.join(tmpDir, 'final-edited.mp4'), path.join(tmpDir, 'final-voiced.mp4')],
-  ]);
-  assert.equal(result.resultPath, path.join(tmpDir, 'final-voiced.mp4'));
+test('runStage refuses a stage whose predecessors are not done, and a skipped stage', async () => {
+  const { db, tmpDir } = await setup();
+  await assert.rejects(runStage(db, 'job-1', tmpDir, 'merge', happyDeps()), /earlier stages/);
+  await assert.rejects(runStage(db, 'job-1', tmpDir, 'restyle', happyDeps()), /skipped/);
+  await assert.rejects(runStage(db, 'job-1', tmpDir, 'bogus', happyDeps()), /Unknown stage/);
 });
 
-test('runJob skips the voice-over stage entirely when the job has no script', async () => {
+test('retrySegment regenerates one segment and marks generate done once all segments are', async () => {
   const { db, tmpDir } = await setup();
-  const deps = {
-    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
-    splitIntoSegments: async () => [{ index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 }],
-    generateFromSegment: async (_segmentPath, _chars, outputPath) => ({ outputPath }),
-    mergeSegments: async (_paths, outputPath) => ({ outputPath }),
-    editVideo: async () => {
-      throw new Error('should not be called');
-    },
-    synthesizeSpeech: async () => {
-      throw new Error('should not be called');
-    },
-    muxVoiceover: async () => {
-      throw new Error('should not be called');
-    },
-  };
+  await assert.rejects(runJob(db, 'job-1', tmpDir, happyDeps({
+    generateFromSegment: async () => { throw new Error('boom'); },
+  })));
 
-  const result = await runJob(db, 'job-1', tmpDir, deps);
-  assert.equal(result.resultPath, path.join(tmpDir, 'final.mp4'));
-});
-
-test('runJob marks the failing segment and the job itself as failed, and stops before merging', async () => {
-  const { db, tmpDir } = await setup();
-
-  const deps = {
-    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
-    splitIntoSegments: async () => [
-      { index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 },
-    ],
-    generateFromSegment: async () => {
-      throw new Error('higgsfield call failed');
-    },
-    mergeSegments: async () => {
-      throw new Error('should not be called');
-    },
-  };
-
-  await assert.rejects(runJob(db, 'job-1', tmpDir, deps), /1 segment\(s\) failed to generate/);
-
-  const job = await getJob(db, 'job-1');
-  assert.equal(job.segments[0].status, 'failed');
-  assert.equal(job.segments[0].error, 'higgsfield call failed');
+  await assert.rejects(retrySegment(db, 'job-1', 0, tmpDir, {
+    generateFromSegment: async () => { throw new Error('still boom'); },
+  }), /still boom/);
+  let job = await getJob(db, 'job-1');
   assert.equal(job.status, 'failed');
-  assert.equal(job.error, '1 segment(s) failed to generate');
-});
+  assert.equal(job.stages.generate.status, 'failed');
 
-test('runJob attempts every remaining segment after one fails, then fails the job without merging', async () => {
-  const { db, tmpDir } = await setup();
-  const attempted = [];
-
-  const deps = {
-    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
-    splitIntoSegments: async () => [
-      { index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 },
-      { index: 1, path: '/tmp/segment-001.mp4', startSeconds: 10, endSeconds: 20 },
-      { index: 2, path: '/tmp/segment-002.mp4', startSeconds: 20, endSeconds: 30 },
-    ],
-    generateFromSegment: async (segmentPath, _chars, outputPath) => {
-      attempted.push(segmentPath);
-      if (segmentPath === '/tmp/segment-001.mp4') {
-        throw new Error('middle segment boom');
-      }
-      return { outputPath };
-    },
-    mergeSegments: async () => {
-      throw new Error('should not be called');
-    },
-  };
-
-  await assert.rejects(runJob(db, 'job-1', tmpDir, deps), /1 segment\(s\) failed to generate/);
-
-  assert.deepEqual(attempted, [
-    '/tmp/segment-000.mp4',
-    '/tmp/segment-001.mp4',
-    '/tmp/segment-002.mp4',
-  ]);
-
-  const job = await getJob(db, 'job-1');
+  await retrySegment(db, 'job-1', 0, tmpDir, { generateFromSegment: async (_s, _c, o) => ({ outputPath: o }) });
+  job = await getJob(db, 'job-1');
   assert.equal(job.segments[0].status, 'done');
-  assert.equal(job.segments[1].status, 'failed');
-  assert.equal(job.segments[1].error, 'middle segment boom');
-  assert.equal(job.segments[2].status, 'done');
-  assert.equal(job.status, 'failed');
+  assert.equal(job.segments[0].error, null);
+  assert.equal(job.stages.generate.status, 'failed', 'segment 1 is still failed');
+  assert.equal(job.status, 'idle');
+
+  await retrySegment(db, 'job-1', 1, tmpDir, { generateFromSegment: async (_s, _c, o) => ({ outputPath: o }) });
+  job = await getJob(db, 'job-1');
+  assert.equal(job.stages.generate.status, 'done');
+  assert.equal(nextStage(job), 'merge');
 });
 
-test('runJob marks the job as failed (with no segments recorded) when the download step itself fails', async () => {
+test('runJob and runStage refuse to start while the job is already running', async () => {
   const { db, tmpDir } = await setup();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const deps = happyDeps({ downloadVideo: async () => { await gate; return { filePath: '/tmp/source.mp4' }; } });
 
-  const deps = {
-    downloadVideo: async () => {
-      throw new Error('video unavailable');
-    },
-  };
-
-  await assert.rejects(runJob(db, 'job-1', tmpDir, deps), /video unavailable/);
-
-  const job = await getJob(db, 'job-1');
-  assert.equal(job.status, 'failed');
-  assert.equal(job.error, 'video unavailable');
-  assert.deepEqual(job.segments, []);
-});
-
-test('retrySegment re-runs a single segment and updates only that segment', async () => {
-  const { db, tmpDir } = await setup();
-
-  const failingDeps = {
-    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
-    splitIntoSegments: async () => [
-      { index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 },
-    ],
-    generateFromSegment: async () => {
-      throw new Error('boom');
-    },
-    mergeSegments: async () => ({ outputPath: path.join(tmpDir, 'final.mp4') }),
-  };
-
-  await assert.rejects(runJob(db, 'job-1', tmpDir, failingDeps));
-
-  const failedJob = await getJob(db, 'job-1');
-  assert.equal(failedJob.segments[0].status, 'failed');
-  assert.equal(failedJob.segments[0].error, 'boom');
-
-  const retryResult = await retrySegment(db, 'job-1', 0, tmpDir, {
-    generateFromSegment: async (_segmentPath, _chars, outputPath) => ({ outputPath }),
-    mergeSegments: async (_paths, outputPath) => ({ outputPath }),
-  });
-
-  assert.equal(retryResult.outputPath, path.join(tmpDir, 'generated-0.mp4'));
-
-  const job = await getJob(db, 'job-1');
-  assert.equal(job.segments[0].status, 'done');
-  assert.equal(job.segments[0].resultPath, path.join(tmpDir, 'generated-0.mp4'));
-  assert.equal(job.segments[0].error, null, 'stale error from the earlier failure must be cleared on a successful retry');
-});
-
-test('retrySegment auto-merges once the retry clears the last failed segment, reaching a done job with resultPath', async () => {
-  const { db, tmpDir } = await setup();
-
-  const initialDeps = {
-    downloadVideo: async () => ({ filePath: '/tmp/source.mp4' }),
-    splitIntoSegments: async () => [
-      { index: 0, path: '/tmp/segment-000.mp4', startSeconds: 0, endSeconds: 10 },
-      { index: 1, path: '/tmp/segment-001.mp4', startSeconds: 10, endSeconds: 20 },
-      { index: 2, path: '/tmp/segment-002.mp4', startSeconds: 20, endSeconds: 30 },
-    ],
-    generateFromSegment: async (segmentPath, _chars, outputPath) => {
-      if (segmentPath === '/tmp/segment-001.mp4') {
-        throw new Error('middle segment boom');
-      }
-      return { outputPath };
-    },
-  };
-
-  await assert.rejects(runJob(db, 'job-1', tmpDir, initialDeps));
-
-  const partialJob = await getJob(db, 'job-1');
-  assert.equal(partialJob.segments[0].status, 'done');
-  assert.equal(partialJob.segments[1].status, 'failed');
-  assert.equal(partialJob.segments[2].status, 'done');
-  assert.equal(partialJob.status, 'failed');
-
-  const mergeCalls = [];
-  const retryResult = await retrySegment(db, 'job-1', 1, tmpDir, {
-    generateFromSegment: async (_segmentPath, _chars, outputPath) => ({ outputPath }),
-    mergeSegments: async (paths, outputPath) => {
-      mergeCalls.push(paths);
-      return { outputPath };
-    },
-  });
-
-  assert.equal(retryResult.outputPath, path.join(tmpDir, 'generated-1.mp4'));
-  assert.equal(mergeCalls.length, 1);
-  assert.deepEqual(mergeCalls[0], [
-    path.join(tmpDir, 'generated-0.mp4'),
-    path.join(tmpDir, 'generated-1.mp4'),
-    path.join(tmpDir, 'generated-2.mp4'),
-  ]);
-
-  const job = await getJob(db, 'job-1');
-  assert.equal(job.status, 'done');
-  assert.equal(job.resultPath, path.join(tmpDir, 'final.mp4'));
+  const running = runJob(db, 'job-1', tmpDir, deps);
+  await new Promise((r) => setTimeout(r, 20));
+  await assert.rejects(runJob(db, 'job-1', tmpDir, deps), /already running/);
+  await assert.rejects(runStage(db, 'job-1', tmpDir, 'generate', deps), /already running/);
+  release();
+  await running;
 });

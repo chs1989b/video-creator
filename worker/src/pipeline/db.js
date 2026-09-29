@@ -1,5 +1,6 @@
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
+import { initialStages } from './stages.js';
 
 export function createDb(dbPath) {
   const adapter = new JSONFile(dbPath);
@@ -21,7 +22,15 @@ function serialize(fn) {
 
 export async function createJob(
   db,
-  { id, youtubeUrl, characterImagePaths, productImagePaths = [], script = null, editPrompt = null },
+  {
+    id,
+    youtubeUrl,
+    characterImagePaths,
+    productImagePaths = [],
+    script = null,
+    restylePrompt = null,
+    editPrompt = null,
+  },
 ) {
   return serialize(async () => {
     await db.read();
@@ -33,10 +42,14 @@ export async function createJob(
       characterImagePaths,
       productImagePaths,
       script,
+      restylePrompt,
       editPrompt,
-      status: 'pending',
+      status: 'idle',
+      currentStage: null,
+      stages: initialStages({ restylePrompt, editPrompt, script }),
       segments: [],
       resultPath: null,
+      error: null,
       createdAt: new Date().toISOString(),
     };
 
@@ -46,14 +59,37 @@ export async function createJob(
   });
 }
 
+// Jobs written before the per-stage model carry a flat status and no `stages`.
+// Give them a stage record derived from what is known (their segments) so the
+// runner and the canvas can treat every job the same way.
+function normalizeJob(job) {
+  if (job.stages) return job;
+  const stages = initialStages(job);
+  const allDone = job.segments.length > 0 && job.segments.every((s) => s.status === 'done');
+  if (allDone) stages.generate.status = 'done';
+  else if (job.segments.some((s) => s.status === 'failed')) stages.generate.status = 'failed';
+  const legacyDone = job.status === 'done' && job.resultPath;
+  if (legacyDone) {
+    for (const s of Object.values(stages)) if (s.status !== 'skipped') s.status = 'done';
+  }
+  return {
+    ...job,
+    stages,
+    currentStage: null,
+    status: legacyDone ? 'done' : job.status === 'failed' || job.error ? 'failed' : 'idle',
+    error: job.error ?? null,
+  };
+}
+
 export async function getJob(db, id) {
   await db.read();
-  return db.data.jobs.find((job) => job.id === id) ?? null;
+  const job = db.data.jobs.find((j) => j.id === id);
+  return job ? normalizeJob(job) : null;
 }
 
 export async function listJobs(db) {
   await db.read();
-  return db.data.jobs;
+  return db.data.jobs.map(normalizeJob);
 }
 
 export async function updateJob(db, id, patch) {

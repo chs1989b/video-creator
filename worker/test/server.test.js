@@ -10,6 +10,7 @@ async function startTestServer(overrides = {}) {
   const app = createApp({
     dataDir,
     runJob: overrides.runJob ?? (async () => ({ resultPath: '/tmp/final.mp4' })),
+    runStage: overrides.runStage ?? (async (_db, _id, _dir, stage) => ({ stage })),
     retrySegment: overrides.retrySegment ?? (async () => ({ outputPath: '/tmp/generated-0.mp4' })),
   });
   const server = app.listen(0);
@@ -29,7 +30,8 @@ test('POST /jobs creates a job and GET /jobs lists it', async () => {
     assert.equal(createRes.status, 201);
     const created = await createRes.json();
     assert.equal(created.youtubeUrl, 'https://youtube.com/watch?v=abc');
-    assert.equal(created.status, 'pending');
+    assert.equal(created.status, 'idle');
+    assert.equal(created.stages.generate.status, 'pending');
 
     const listRes = await fetch(`${baseUrl}/jobs`);
     const jobs = await listRes.json();
@@ -99,20 +101,23 @@ test('POST /jobs stores a trimmed script and treats a blank one as absent', asyn
   }
 });
 
-test('POST /jobs stores an optional editPrompt', async () => {
+test('POST /jobs stores optional restylePrompt and editPrompt', async () => {
   const { server, baseUrl } = await startTestServer();
   try {
     const form = new FormData();
     form.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
     form.append('characterImages', new Blob([new Uint8Array([1])]), 'char.png');
+    form.append('restylePrompt', ' Beige shirt ');
     form.append('editPrompt', ' Warmer lighting ');
     const created = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form })).json();
+    assert.equal(created.restylePrompt, 'Beige shirt');
     assert.equal(created.editPrompt, 'Warmer lighting');
 
     const without = new FormData();
     without.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
     without.append('characterImages', new Blob([new Uint8Array([1])]), 'char.png');
     const createdWithout = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: without })).json();
+    assert.equal(createdWithout.restylePrompt, null);
     assert.equal(createdWithout.editPrompt, null);
   } finally {
     server.close();
@@ -154,6 +159,58 @@ test('POST /jobs without a characterImages file returns 400', async () => {
     assert.equal(res.status, 400);
     const body = await res.json();
     assert.match(body.error, /characterImages/);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /jobs with autorun=false does not start the pipeline; /run and /stages/:stage/run start it', async () => {
+  const runs = [];
+  const { server, baseUrl } = await startTestServer({
+    runJob: async (_db, id) => { runs.push(['job', id]); return { resultPath: null }; },
+    runStage: async (_db, id, _dir, stage) => { runs.push(['stage', id, stage]); return { stage }; },
+  });
+  try {
+    const form = new FormData();
+    form.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    form.append('characterImages', new Blob([new Uint8Array([1])]), 'char.png');
+    form.append('autorun', 'false');
+    const created = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form })).json();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(runs, [], 'nothing runs until asked');
+
+    const stageRes = await fetch(`${baseUrl}/jobs/${created.id}/stages/generate/run`, { method: 'POST' });
+    assert.equal(stageRes.status, 202);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(runs, [['stage', created.id, 'generate']]);
+
+    const blocked = await fetch(`${baseUrl}/jobs/${created.id}/stages/merge/run`, { method: 'POST' });
+    assert.equal(blocked.status, 409, 'merge cannot run before generate is done');
+
+    const unknown = await fetch(`${baseUrl}/jobs/${created.id}/stages/bogus/run`, { method: 'POST' });
+    assert.equal(unknown.status, 400);
+
+    const runRes = await fetch(`${baseUrl}/jobs/${created.id}/run`, { method: 'POST' });
+    assert.equal(runRes.status, 202);
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(runs[1], ['job', created.id]);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /jobs without autorun starts the whole pipeline right away', async () => {
+  const runs = [];
+  const { server, baseUrl } = await startTestServer({
+    runJob: async (_db, id) => { runs.push(id); return { resultPath: null }; },
+  });
+  try {
+    const form = new FormData();
+    form.append('youtubeUrl', 'https://youtube.com/watch?v=abc');
+    form.append('characterImages', new Blob([new Uint8Array([1])]), 'char.png');
+    const created = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form })).json();
+    await new Promise((r) => setTimeout(r, 10));
+    assert.deepEqual(runs, [created.id]);
   } finally {
     server.close();
   }

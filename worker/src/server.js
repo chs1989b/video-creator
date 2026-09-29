@@ -6,13 +6,23 @@ import fs from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { createDb, createJob, getJob, listJobs } from './pipeline/db.js';
-import { runJob as defaultRunJob, retrySegment as defaultRetrySegment } from './pipeline/jobRunner.js';
+import {
+  runJob as defaultRunJob,
+  runStage as defaultRunStage,
+  retrySegment as defaultRetrySegment,
+} from './pipeline/jobRunner.js';
+import { STAGE_ORDER } from './pipeline/stages.js';
 
 function optionalText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defaultRetrySegment }) {
+export function createApp({
+  dataDir,
+  runJob = defaultRunJob,
+  runStage = defaultRunStage,
+  retrySegment = defaultRetrySegment,
+}) {
   const app = express();
   app.use(cors());
 
@@ -34,6 +44,15 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
     { name: 'productImages', maxCount: 1 },
   ]);
 
+  const workDirFor = (id) => path.join(dataDir, 'jobs', id);
+
+  // Stage runs are long (minutes); respond at once and let the client poll.
+  function startInBackground(label, promise) {
+    promise.catch((error) => {
+      console.error(`${label} failed:`, error.message);
+    });
+  }
+
   app.post('/jobs', jobUploads, async (req, res) => {
     const { youtubeUrl } = req.body;
     if (!youtubeUrl) {
@@ -50,17 +69,18 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
     const characterImagePaths = characterFiles.map((file) => file.path);
     const productImagePaths = (req.files?.productImages ?? []).map((file) => file.path);
     const script = optionalText(req.body.script);
+    const restylePrompt = optionalText(req.body.restylePrompt);
     const editPrompt = optionalText(req.body.editPrompt);
     const job = await createJob(db, {
-      id, youtubeUrl, characterImagePaths, productImagePaths, script, editPrompt,
+      id, youtubeUrl, characterImagePaths, productImagePaths, script, restylePrompt, editPrompt,
     });
 
-    const workDir = path.join(dataDir, 'jobs', id);
-    await fs.mkdir(workDir, { recursive: true });
+    await fs.mkdir(workDirFor(id), { recursive: true });
 
-    runJob(db, id, workDir).catch((error) => {
-      console.error(`Job ${id} failed:`, error.message);
-    });
+    // autorun=false creates the job and waits for stage-by-stage requests.
+    if (req.body.autorun !== 'false') {
+      startInBackground(`Job ${id}`, runJob(db, id, workDirFor(id)));
+    }
 
     res.status(201).json(job);
   });
@@ -78,10 +98,53 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
     res.json(job);
   });
 
+  // Resume: runs every stage that is not done yet, in order.
+  app.post('/jobs/:id/run', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    if (job.status === 'running') {
+      res.status(409).json({ error: 'job is already running' });
+      return;
+    }
+    startInBackground(`Job ${job.id}`, runJob(db, job.id, workDirFor(job.id)));
+    res.status(202).json({ ok: true });
+  });
+
+  // Step: runs a single stage; earlier stages must already be done.
+  app.post('/jobs/:id/stages/:stage/run', async (req, res) => {
+    const { id, stage } = req.params;
+    const job = await getJob(db, id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    if (!STAGE_ORDER.includes(stage)) {
+      res.status(400).json({ error: `unknown stage: ${stage}` });
+      return;
+    }
+    if (job.status === 'running') {
+      res.status(409).json({ error: 'job is already running' });
+      return;
+    }
+    const earlier = STAGE_ORDER.slice(0, STAGE_ORDER.indexOf(stage));
+    if (!earlier.every((s) => ['done', 'skipped'].includes(job.stages[s]?.status))) {
+      res.status(409).json({ error: `stage ${stage} needs the earlier stages to finish first` });
+      return;
+    }
+    if (job.stages[stage]?.status === 'skipped') {
+      res.status(409).json({ error: `stage ${stage} has no input and is skipped` });
+      return;
+    }
+    startInBackground(`Job ${id} stage ${stage}`, runStage(db, id, workDirFor(id), stage));
+    res.status(202).json({ ok: true, stage });
+  });
+
   app.post('/jobs/:id/segments/:index/retry', async (req, res) => {
-    const workDir = path.join(dataDir, 'jobs', req.params.id);
     try {
-      const result = await retrySegment(db, req.params.id, Number(req.params.index), workDir);
+      const result = await retrySegment(db, req.params.id, Number(req.params.index), workDirFor(req.params.id));
       res.json({ ok: true, ...result });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -95,6 +158,17 @@ export function createApp({ dataDir, runJob = defaultRunJob, retrySegment = defa
       return;
     }
     res.sendFile(job.resultPath);
+  });
+
+  // Any finished stage's video, so the canvas can preview intermediate output.
+  app.get('/jobs/:id/stages/:stage/output', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    const output = job?.stages?.[req.params.stage]?.outputPath;
+    if (!output) {
+      res.status(404).json({ error: 'stage output not ready' });
+      return;
+    }
+    res.sendFile(output);
   });
 
   return app;

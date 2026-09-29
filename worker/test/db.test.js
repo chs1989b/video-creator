@@ -15,7 +15,8 @@ test('createJob, getJob, listJobs, updateJob round-trip through a real temp file
     characterImagePaths: ['/tmp/char.png'],
   });
 
-  assert.equal(created.status, 'pending');
+  assert.equal(created.status, 'idle');
+  assert.equal(created.stages.generate.status, 'pending');
   assert.deepEqual(created.segments, []);
   assert.equal(created.resultPath, null);
 
