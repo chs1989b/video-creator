@@ -17,6 +17,33 @@ export type StageState = {
   error: string | null;
 };
 
+export type Verdict = 'approve' | 'reject';
+
+export type Attempt = {
+  id: string;
+  n: number;
+  kind: 'preview';
+  prompt: string | null;
+  characterImagePath: string;
+  productImagePath: string | null;
+  segmentIndex: number;
+  status: 'running' | 'done' | 'failed';
+  outputPath: string | null;
+  estimatedCredits: number;
+  credits: number | null;
+  verdict: Verdict | null;
+  reasons: string[];
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+export type JobTotals = { previews: number; credits: number; krw: number };
+
+export const REJECT_REASONS = ['얼굴', '제품', '동작', '배경', '기타'] as const;
+/** 5 seconds x 7 credits per second (ad_multiplier). */
+export const PREVIEW_CREDITS = 35;
+
 export type Job = {
   id: string;
   youtubeUrl: string;
@@ -26,12 +53,17 @@ export type Job = {
   restylePrompt: string | null;
   editPrompt: string | null;
   status: 'idle' | 'running' | 'done' | 'failed';
-  currentStage: StageName | null;
+  currentStage: StageName | 'preview' | null;
   stages: Record<StageName, StageState>;
   segments: JobSegment[];
   resultPath: string | null;
   error: string | null;
   createdAt: string;
+  previewRequired: boolean;
+  previewLimit: number;
+  attempts: Attempt[];
+  approvedAttemptId: string | null;
+  totals?: JobTotals;
 };
 
 const DEFAULT_BASE_URL =
@@ -69,6 +101,8 @@ export type CreateJobInput = {
   editPrompt?: string | null;
   /** false = create only; stages are then started one by one. */
   autorun?: boolean;
+  /** true = the job starts with 5-second previews that must be approved. */
+  preview?: boolean;
 };
 
 export async function createJob(
@@ -80,6 +114,7 @@ export async function createJob(
     restylePrompt = null,
     editPrompt = null,
     autorun = true,
+    preview = false,
   }: CreateJobInput,
   { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
 ): Promise<Job> {
@@ -101,6 +136,9 @@ export async function createJob(
   }
   if (!autorun) {
     form.append('autorun', 'false');
+  }
+  if (preview) {
+    form.append('preview', 'true');
   }
   const res = await request(`${baseUrl}/jobs`, { method: 'POST', body: form }, fetchFn, '작업 생성 실패');
   return res.json();
@@ -141,4 +179,51 @@ export function stageOutputUrl(
   { baseUrl = DEFAULT_BASE_URL }: { baseUrl?: string } = {},
 ): string {
   return `${baseUrl}/jobs/${jobId}/stages/${stage}/output`;
+}
+
+/** Failed previews are refunded and do not count toward the limit (same rule as the worker). */
+export function usedPreviews(job: Job): number {
+  return job.attempts.filter((a) => a.status !== 'failed').length;
+}
+
+export async function runPreview(
+  id: string,
+  { prompt = null }: { prompt?: string | null } = {},
+  { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
+): Promise<void> {
+  const form = new FormData();
+  if (prompt && prompt.trim()) form.append('prompt', prompt.trim());
+  await request(`${baseUrl}/jobs/${id}/previews`, { method: 'POST', body: form }, fetchFn, '미리보기 실행 실패');
+}
+
+export async function sendVerdict(
+  id: string,
+  attemptId: string,
+  verdict: Verdict,
+  reasons: string[] = [],
+  { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
+): Promise<Job> {
+  const res = await request(
+    `${baseUrl}/jobs/${id}/attempts/${attemptId}/verdict`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verdict, reasons }) },
+    fetchFn,
+    '판정 저장 실패',
+  );
+  return res.json();
+}
+
+export async function unlockPreview(
+  id: string,
+  { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
+): Promise<Job> {
+  const res = await request(`${baseUrl}/jobs/${id}/previews/unlock`, { method: 'POST' }, fetchFn, '한도 해제 실패');
+  return res.json();
+}
+
+export function attemptOutputUrl(
+  jobId: string,
+  attemptId: string,
+  { baseUrl = DEFAULT_BASE_URL }: { baseUrl?: string } = {},
+): string {
+  return `${baseUrl}/jobs/${jobId}/attempts/${attemptId}/output`;
 }

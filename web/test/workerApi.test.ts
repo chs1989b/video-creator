@@ -1,5 +1,8 @@
 import { test, expect } from 'vitest';
-import { createJob, getJob, runJob, runStage, resultUrl, stageOutputUrl } from '../lib/workerApi';
+import {
+  createJob, getJob, runJob, runStage, resultUrl, stageOutputUrl,
+  runPreview, sendVerdict, unlockPreview, attemptOutputUrl, usedPreviews, type Job,
+} from '../lib/workerApi';
 
 function fakeFile(name: string): File {
   return new File(['fake-image-bytes'], name, { type: 'image/png' });
@@ -122,4 +125,44 @@ test('resultUrl and stageOutputUrl build worker URLs', () => {
   expect(stageOutputUrl('job-1', 'merge', { baseUrl: 'http://localhost:4000' })).toBe(
     'http://localhost:4000/jobs/job-1/stages/merge/output',
   );
+});
+
+test('createJob marks a preview job with preview=true', async () => {
+  const { calls, fetchFn } = recordingFetch();
+  await createJob(
+    { youtubeUrl: 'https://example.com/v.mp4', characterImage: fakeFile('c.png'), preview: true, autorun: false },
+    { baseUrl: 'http://w', fetchFn },
+  );
+  const body = calls[0].init.body as FormData;
+  expect(body.get('preview')).toBe('true');
+  expect(body.get('autorun')).toBe('false');
+});
+
+test('runPreview posts to the previews route with a trimmed prompt only when given', async () => {
+  const { calls, fetchFn } = recordingFetch(202, { ok: true });
+  await runPreview('job-1', { prompt: '  Keep her smile. ' }, { baseUrl: 'http://w', fetchFn });
+  await runPreview('job-1', {}, { baseUrl: 'http://w', fetchFn });
+  expect(calls[0].url).toBe('http://w/jobs/job-1/previews');
+  expect(calls[0].init.method).toBe('POST');
+  expect((calls[0].init.body as FormData).get('prompt')).toBe('Keep her smile.');
+  expect((calls[1].init.body as FormData).get('prompt')).toBeNull();
+});
+
+test('sendVerdict posts JSON and returns the updated job; unlockPreview posts to unlock', async () => {
+  const { calls, fetchFn } = recordingFetch(200, { id: 'job-1', approvedAttemptId: 'a2' });
+  const job = await sendVerdict('job-1', 'a2', 'reject', ['얼굴'], { baseUrl: 'http://w', fetchFn });
+  expect(calls[0].url).toBe('http://w/jobs/job-1/attempts/a2/verdict');
+  expect(calls[0].init.headers).toEqual({ 'Content-Type': 'application/json' });
+  expect(JSON.parse(String(calls[0].init.body))).toEqual({ verdict: 'reject', reasons: ['얼굴'] });
+  expect(job.approvedAttemptId).toBe('a2');
+
+  await unlockPreview('job-1', { baseUrl: 'http://w', fetchFn });
+  expect(calls[1].url).toBe('http://w/jobs/job-1/previews/unlock');
+  expect(calls[1].init.method).toBe('POST');
+});
+
+test('attemptOutputUrl and usedPreviews', () => {
+  expect(attemptOutputUrl('job-1', 'a3', { baseUrl: 'http://w' })).toBe('http://w/jobs/job-1/attempts/a3/output');
+  const job = { attempts: [{ status: 'done' }, { status: 'failed' }, { status: 'running' }] } as unknown as Job;
+  expect(usedPreviews(job)).toBe(2);
 });
