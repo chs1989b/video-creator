@@ -125,9 +125,12 @@ export async function recordVerdict(db, jobId, attemptId, { verdict, reasons = [
   return requireJob(db, jobId);
 }
 
-/** One more preview beyond the limit, after the user has seen the cost. */
+/** One more preview beyond the limit, after the user has seen the cost. Only once the limit is used up. */
 export async function unlockPreview(db, jobId) {
   const job = await requireJob(db, jobId);
+  if (!job.previewRequired) throw new Error('this job does not use previews');
+  if (job.approvedAttemptId) throw new Error('a preview is already approved');
+  if (usedPreviews(job) < job.previewLimit) throw new Error(`preview limit not reached yet (${job.previewLimit})`);
   await updateJob(db, jobId, { previewLimit: job.previewLimit + 1 });
   return requireJob(db, jobId);
 }

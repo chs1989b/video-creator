@@ -151,3 +151,23 @@ test('a job created without previews refuses preview calls', async () => {
   const { db, tmpDir } = await setup({ previewRequired: false });
   await assert.rejects(runPreview(db, 'job-1', tmpDir, {}, deps()), /does not use previews/);
 });
+
+test('unlock is refused unless a preview job has used up its limit, and never after approval', async () => {
+  const { db, tmpDir } = await setup();
+  await assert.rejects(unlockPreview(db, 'job-1'), /limit/);
+
+  for (let i = 0; i < 5; i += 1) {
+    const a = await runPreview(db, 'job-1', tmpDir, {}, deps());
+    await recordVerdict(db, 'job-1', a.id, { verdict: 'reject' });
+  }
+  const unlocked = await unlockPreview(db, 'job-1');
+  assert.equal(unlocked.previewLimit, 6);
+  await assert.rejects(unlockPreview(db, 'job-1'), /limit/); // still below the new limit
+
+  const sixth = await runPreview(db, 'job-1', tmpDir, {}, deps());
+  await recordVerdict(db, 'job-1', sixth.id, { verdict: 'approve' });
+  await assert.rejects(unlockPreview(db, 'job-1'), /approved/);
+
+  const { db: plainDb } = await setup({ previewRequired: false });
+  await assert.rejects(unlockPreview(plainDb, 'job-1'), /does not use previews/);
+});

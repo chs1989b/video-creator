@@ -199,7 +199,11 @@ export function createApp({
       res.status(404).json({ error: 'not found' });
       return;
     }
-    res.json(withTotals(await unlockPreview(db, job.id)));
+    try {
+      res.json(withTotals(await unlockPreview(db, job.id)));
+    } catch (error) {
+      res.status(409).json({ error: error.message });
+    }
   });
 
   app.post('/jobs/:id/attempts/:attemptId/verdict', async (req, res) => {

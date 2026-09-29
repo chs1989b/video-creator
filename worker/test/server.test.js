@@ -326,8 +326,9 @@ test('verdict, unlock, attempt output and estimate routes', async () => {
     assert.equal(video.status, 200);
     assert.equal(await video.text(), 'fake-video');
 
-    const unlocked = await (await fetch(`${baseUrl}/jobs/${job.id}/previews/unlock`, { method: 'POST' })).json();
-    assert.equal(unlocked.previewLimit, 6);
+    const early = await fetch(`${baseUrl}/jobs/${job.id}/previews/unlock`, { method: 'POST' });
+    assert.equal(early.status, 409); // 1 of 5 used: nothing to unlock yet
+    assert.match((await early.json()).error, /limit not reached/);
 
     const verdictRes = await fetch(`${baseUrl}/jobs/${job.id}/attempts/a1/verdict`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verdict: 'approve' }),
