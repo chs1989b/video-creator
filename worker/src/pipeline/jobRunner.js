@@ -201,6 +201,40 @@ export async function runJob(db, jobId, workDir, deps = {}) {
   return { resultPath: job.resultPath };
 }
 
+const INPUT_STAGE = { restylePrompt: 'restyle', editPrompt: 'edit', script: 'voiceover' };
+
+/**
+ * Add, change or clear the optional prompts/script after the job exists (e.g.
+ * after a preview is approved). A stage's input can change only while that
+ * stage, and every stage after it, has not run yet.
+ */
+export async function updateJobInputs(db, jobId, inputs) {
+  const job = await requireJob(db, jobId);
+  if (job.status === 'running') throw new Error('job is already running');
+
+  const patch = {};
+  const stages = { ...job.stages };
+  for (const [field, stage] of Object.entries(INPUT_STAGE)) {
+    if (!(field in inputs)) continue;
+    const value = typeof inputs[field] === 'string' && inputs[field].trim() ? inputs[field].trim() : null;
+    if (value === (job[field] ?? null)) continue;
+    if (['done', 'running'].includes(stages[stage].status)) throw new Error(`stage ${stage} already ran`);
+    const later = STAGE_ORDER.slice(STAGE_ORDER.indexOf(stage) + 1).find((s) => stages[s]?.status === 'done');
+    if (later) throw new Error(`stage ${stage} can no longer change: ${later} already ran`);
+    patch[field] = value;
+    stages[stage] = { status: value ? 'pending' : 'skipped', outputPath: null, error: null };
+  }
+  if (Object.keys(patch).length === 0) return job;
+
+  const reopened = job.status === 'done' && Object.values(stages).some((st) => st.status === 'pending');
+  await updateJob(db, jobId, {
+    ...patch,
+    stages,
+    ...(reopened ? { status: 'idle', resultPath: null } : {}),
+  });
+  return requireJob(db, jobId);
+}
+
 /** Regenerate one segment. Does not continue on its own — run the generate stage or the job afterwards. */
 export async function retrySegment(db, jobId, segmentIndex, workDir, deps = {}) {
   const d = resolveDeps(deps);

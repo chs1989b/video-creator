@@ -374,3 +374,30 @@ test('two preview requests at once start only one preview', async () => {
     server.close();
   }
 });
+
+test('PATCH /jobs/:id adds or changes optional inputs; 404 unknown, 409 while running', async () => {
+  const { server, baseUrl, dataDir } = await startTestServer();
+  try {
+    const { job } = await createPreviewJob(baseUrl);
+    const patch = (id, body) => fetch(`${baseUrl}/jobs/${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    });
+
+    const res = await patch(job.id, { script: 'Hi everyone.', restylePrompt: 'Beige shirt.' });
+    assert.equal(res.status, 200);
+    const updated = await res.json();
+    assert.equal(updated.script, 'Hi everyone.');
+    assert.equal(updated.stages.voiceover.status, 'pending');
+    assert.equal(updated.stages.restyle.status, 'pending');
+    assert.ok(updated.totals);
+
+    assert.equal((await patch('nope', { script: 'x' })).status, 404);
+
+    await updateJob(createDb(path.join(dataDir, 'db.json')), job.id, { status: 'running' });
+    const busy = await patch(job.id, { script: 'Changed.' });
+    assert.equal(busy.status, 409);
+    assert.match((await busy.json()).error, /already running/);
+  } finally {
+    server.close();
+  }
+});

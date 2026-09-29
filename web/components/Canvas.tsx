@@ -20,7 +20,7 @@ import { TextInputNode, type TextInputNodeData } from './nodes/TextInputNode';
 import { StageNode, canRunStage, type StageNodeData } from './nodes/StageNode';
 import { ResultNode, type ResultNodeData } from './nodes/ResultNode';
 import { PreviewNode, type PreviewNodeData } from './nodes/PreviewNode';
-import { previewAllowed, unlockAllowed } from '../lib/previewRules';
+import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
 import {
   createJob,
   getJob,
@@ -33,10 +33,12 @@ import {
   unlockPreview,
   attemptOutputUrl,
   PREVIEW_CREDITS,
+  updateJobInputs,
   STAGE_ORDER,
   type Job,
   type StageName,
   type Verdict,
+  type JobInputs,
 } from '../lib/workerApi';
 
 const nodeTypes = {
@@ -250,6 +252,34 @@ export function Canvas() {
     [url, personFile, productFile, script, restylePrompt, editPrompt, startPolling],
   );
 
+  // Prompts/script typed after approval, not yet saved on the job.
+  const editsFor = useCallback(
+    (target: Job): JobInputs => {
+      const edits: JobInputs = {};
+      const fields = [
+        ['restylePrompt', 'restyle', restylePrompt],
+        ['editPrompt', 'edit', editPrompt],
+        ['script', 'voiceover', script],
+      ] as const;
+      for (const [field, stage, value] of fields) {
+        if (inputEditable(target, stage) && (value.trim() || null) !== (target[field] ?? null)) edits[field] = value;
+      }
+      return edits;
+    },
+    [restylePrompt, editPrompt, script],
+  );
+
+  const syncInputs = useCallback(
+    async (target: Job): Promise<Job> => {
+      const edits = editsFor(target);
+      if (Object.keys(edits).length === 0) return target;
+      const updated = await updateJobInputs(target.id, edits);
+      setJob(updated);
+      return updated;
+    },
+    [editsFor],
+  );
+
   const handleRunPreview = useCallback(async () => {
     if (previewPendingRef.current) return;
     previewPendingRef.current = true;
@@ -306,13 +336,14 @@ export function Canvas() {
     }
     setErrorMessage(null);
     try {
-      await runJob(job.id);
-      setJob({ ...job, status: 'running' });
-      startPolling(job.id);
+      const target = await syncInputs(job);
+      await runJob(target.id);
+      setJob({ ...target, status: 'running' });
+      startPolling(target.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '이어서 실행하지 못했습니다.');
     }
-  }, [job, handleRunPreview, startPolling]);
+  }, [job, handleRunPreview, startPolling, syncInputs]);
 
   const handleRunStage = useCallback(
     async (stage: StageName) => {
@@ -323,6 +354,7 @@ export function Canvas() {
         if (!target) return;
       }
       try {
+        target = await syncInputs(target);
         await runStage(target.id, stage);
         setJob({ ...target, status: 'running', currentStage: stage });
         startPolling(target.id);
@@ -330,7 +362,7 @@ export function Canvas() {
         setErrorMessage(error instanceof Error ? error.message : '단계를 실행하지 못했습니다.');
       }
     },
-    [job, submit, startPolling],
+    [job, submit, startPolling, syncInputs],
   );
 
   const handleRetrySegment = useCallback(
@@ -381,7 +413,7 @@ export function Canvas() {
         hint: '비우면 의상·배경은 그대로',
         value: restylePrompt,
         onChange: setRestylePrompt,
-        disabled: inputsLocked,
+        disabled: isSubmitting || !inputEditable(job, 'restyle'),
       },
       'edit-prompt': {
         title: '보정 프롬프트',
@@ -389,7 +421,7 @@ export function Canvas() {
         hint: '비우면 보정 없이 넘어갑니다',
         value: editPrompt,
         onChange: setEditPrompt,
-        disabled: inputsLocked,
+        disabled: isSubmitting || !inputEditable(job, 'edit'),
       },
       script: {
         title: '나레이션 대본',
@@ -397,7 +429,7 @@ export function Canvas() {
         hint: '비우면 음성 없이 만듭니다',
         value: script,
         onChange: setScript,
-        disabled: inputsLocked,
+        disabled: isSubmitting || !inputEditable(job, 'voiceover'),
       },
       generate: stageData('generate'),
       merge: stageData('merge'),
@@ -430,7 +462,8 @@ export function Canvas() {
     [setEdges],
   );
 
-  const remaining = job ? STAGE_ORDER.some((s) => ['pending', 'failed'].includes(job.stages[s]?.status)) : false;
+  const hasEdits = job ? Object.keys(editsFor(job)).length > 0 : false;
+  const remaining = job ? hasEdits || STAGE_ORDER.some((s) => ['pending', 'failed'].includes(job.stages[s]?.status)) : false;
   const awaitingApproval = Boolean(job?.previewRequired && !job.approvedAttemptId);
   const runLabel = isSubmitting
     ? '보내는 중'
@@ -440,7 +473,7 @@ export function Canvas() {
         ? '5초 미리보기 만들기'
         : awaitingApproval
           ? '미리보기를 승인하세요'
-          : job.status === 'done'
+          : job.status === 'done' && !hasEdits
             ? '완성됨'
             : job.status === 'failed'
               ? '실패한 단계부터 이어서'

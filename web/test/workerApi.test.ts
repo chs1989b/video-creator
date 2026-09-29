@@ -1,7 +1,7 @@
 import { test, expect } from 'vitest';
 import {
   createJob, getJob, runJob, runStage, resultUrl, stageOutputUrl,
-  runPreview, sendVerdict, unlockPreview, attemptOutputUrl, usedPreviews, type Job,
+  runPreview, sendVerdict, unlockPreview, attemptOutputUrl, usedPreviews, updateJobInputs, type Job,
 } from '../lib/workerApi';
 
 function fakeFile(name: string): File {
@@ -178,4 +178,13 @@ test('runPreview can send a new person or product photo for this attempt only', 
   expect((body.get('characterImages') as File).name).toBe('new-face.png');
   expect((body.get('productImages') as File).name).toBe('new-pen.png');
   expect(body.get('prompt')).toBe('Warmer smile.');
+});
+
+test('updateJobInputs sends a PATCH with the given fields', async () => {
+  const { calls, fetchFn } = recordingFetch(200, { id: 'job-1', script: 'Hi.' });
+  const job = await updateJobInputs('job-1', { script: 'Hi.', restylePrompt: '' }, { baseUrl: 'http://w', fetchFn });
+  expect(calls[0].url).toBe('http://w/jobs/job-1');
+  expect(calls[0].init.method).toBe('PATCH');
+  expect(JSON.parse(String(calls[0].init.body))).toEqual({ script: 'Hi.', restylePrompt: '' });
+  expect(job.script).toBe('Hi.');
 });

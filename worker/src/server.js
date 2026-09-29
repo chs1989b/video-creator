@@ -12,6 +12,7 @@ import {
   retrySegment as defaultRetrySegment,
   nextStage,
   APPROVAL_REQUIRED,
+  updateJobInputs,
 } from './pipeline/jobRunner.js';
 import {
   runPreview as defaultRunPreview,
@@ -113,6 +114,24 @@ export function createApp({
       return;
     }
     res.json(withTotals(job));
+  });
+
+  // Add or change the optional prompts/script later (e.g. after a preview is approved).
+  app.patch('/jobs/:id', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const inputs = {};
+    for (const field of ['script', 'restylePrompt', 'editPrompt']) {
+      if (req.body && field in req.body) inputs[field] = req.body[field];
+    }
+    try {
+      res.json(withTotals(await updateJobInputs(db, job.id, inputs)));
+    } catch (error) {
+      res.status(409).json({ error: error.message });
+    }
   });
 
   // Resume: runs every stage that is not done yet, in order.

@@ -236,3 +236,20 @@ export function attemptOutputUrl(
 ): string {
   return `${baseUrl}/jobs/${jobId}/attempts/${attemptId}/output`;
 }
+
+export type JobInputs = { script?: string | null; restylePrompt?: string | null; editPrompt?: string | null };
+
+/** Add, change or clear optional prompts/script on an existing job (e.g. after a preview is approved). */
+export async function updateJobInputs(
+  id: string,
+  inputs: JobInputs,
+  { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
+): Promise<Job> {
+  const res = await request(
+    `${baseUrl}/jobs/${id}`,
+    { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(inputs) },
+    fetchFn,
+    '입력 저장 실패',
+  );
+  return res.json();
+}

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createDb, createJob, getJob, updateJob } from '../src/pipeline/db.js';
-import { runJob, runStage, retrySegment, nextStage, ensureSegments, resolveDeps } from '../src/pipeline/jobRunner.js';
+import { runJob, runStage, retrySegment, nextStage, ensureSegments, resolveDeps, updateJobInputs } from '../src/pipeline/jobRunner.js';
 
 async function setup(extra = {}) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jobrunner-test-'));
@@ -284,4 +284,38 @@ test('finishing stages record their estimated credits', async () => {
   assert.equal(job.stages.restyle.credits, 30); // 15-second video -> 2 x 15
   assert.equal(job.stages.voiceover.credits, 0.45);
   assert.equal(job.stages.edit.credits ?? null, null); // skipped: nothing spent
+});
+
+test('optional inputs can be added or cleared after approval while their stage has not run', async () => {
+  const { db, tmpDir } = await setup({ restylePrompt: 'Beige shirt.' });
+
+  const job = await updateJobInputs(db, 'job-1', { script: '  Hi everyone.  ', restylePrompt: '' });
+
+  assert.equal(job.script, 'Hi everyone.');
+  assert.equal(job.stages.voiceover.status, 'pending');
+  assert.equal(job.restylePrompt, null);
+  assert.equal(job.stages.restyle.status, 'skipped');
+  assert.equal(job.stages.edit.status, 'skipped'); // untouched
+
+  await runJob(db, 'job-1', tmpDir, happyDeps());
+  const done = await getJob(db, 'job-1');
+  assert.equal(done.stages.voiceover.status, 'done');
+});
+
+test('inputs of a stage that ran, or that sits before a stage that ran, cannot change; nor while running', async () => {
+  const { db, tmpDir } = await setup({ editPrompt: 'Warmer light.' });
+  await runJob(db, 'job-1', tmpDir, happyDeps());
+
+  await assert.rejects(updateJobInputs(db, 'job-1', { editPrompt: 'Cooler.' }), /already ran/);
+  await assert.rejects(updateJobInputs(db, 'job-1', { restylePrompt: 'Red dress.' }), /already ran/);
+  const same = await updateJobInputs(db, 'job-1', { editPrompt: 'Warmer light.' }); // unchanged is fine
+  assert.equal(same.stages.edit.status, 'done');
+
+  const added = await updateJobInputs(db, 'job-1', { script: 'New narration.' });
+  assert.equal(added.stages.voiceover.status, 'pending');
+  assert.equal(added.status, 'idle'); // a finished job reopens for the new stage
+  assert.equal(nextStage(added), 'voiceover');
+
+  await updateJob(db, 'job-1', { status: 'running' });
+  await assert.rejects(updateJobInputs(db, 'job-1', { script: 'x' }), /already running/);
 });

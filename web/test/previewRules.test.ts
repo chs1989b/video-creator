@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { previewAllowed, unlockAllowed, previewStatus } from '../lib/previewRules';
+import { previewAllowed, unlockAllowed, previewStatus, inputEditable } from '../lib/previewRules';
 import type { Attempt, Job } from '../lib/workerApi';
 
 const attempt = (n: number, status: Attempt['status'], verdict: Attempt['verdict'] = null): Attempt => ({
@@ -60,4 +60,22 @@ test('the preview card states', () => {
   expect(previewStatus(job({ attempts: [attempt(1, 'failed')] }))).toEqual({ text: '미리보기 실패', tone: 'failed' });
   expect(previewStatus(job({ approvedAttemptId: 'a2', attempts: [attempt(1, 'done', 'reject'), attempt(2, 'done', 'approve')] })))
     .toEqual({ text: '승인됨 · 미리보기 2회', tone: 'done' });
+});
+
+test('optional inputs are editable before a job exists and after approval, until their stage (or a later one) runs', () => {
+  const st = (status: string) => ({ status, outputPath: null, error: null }) as Job['stages']['generate'];
+  const stages = (over: Partial<Record<string, string>> = {}) => ({
+    generate: st('done'), merge: st('done'), restyle: st('skipped'), edit: st('skipped'), voiceover: st('skipped'),
+    ...Object.fromEntries(Object.entries(over).map(([k, v]) => [k, st(v as string)])),
+  }) as Job['stages'];
+  const approved = (over = {}) => job({ approvedAttemptId: 'a1', stages: stages(over) });
+
+  expect(inputEditable(null, 'voiceover')).toBe(true);
+  expect(inputEditable(job({ stages: stages() }), 'voiceover')).toBe(false); // preview not approved yet
+  expect(inputEditable(approved(), 'voiceover')).toBe(true);
+  expect(inputEditable(approved({ voiceover: 'done' }), 'voiceover')).toBe(false);
+  expect(inputEditable(approved({ edit: 'done' }), 'restyle')).toBe(false); // a later stage already ran
+  expect(inputEditable(approved({ edit: 'done' }), 'voiceover')).toBe(true);
+  expect(inputEditable(job({ approvedAttemptId: 'a1', status: 'running', stages: stages() }), 'voiceover')).toBe(false);
+  expect(inputEditable(job({ previewRequired: false, stages: stages() }), 'voiceover')).toBe(false); // old jobs stay as before
 });

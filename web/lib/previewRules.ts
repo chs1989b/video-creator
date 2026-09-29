@@ -1,4 +1,4 @@
-import type { Attempt, Job } from './workerApi';
+import type { Attempt, Job, StageName } from './workerApi';
 import { usedPreviews } from './workerApi';
 
 export const latestAttempt = (job: Job | null): Attempt | undefined => job?.attempts[job.attempts.length - 1];
@@ -34,4 +34,18 @@ export function previewStatus(job: Job | null): PreviewStatus {
   if (job.status === 'failed' && !latest) return { text: job.error ?? '영상 준비 실패', tone: 'failed' };
   if (latest?.status === 'failed') return { text: latest.error ?? '미리보기 실패', tone: 'failed' };
   return { text: `${usedPreviews(job)} / ${job.previewLimit}회 사용`, tone: job.attempts.length ? 'active' : 'idle' };
+}
+
+const INPUT_ORDER: StageName[] = ['restyle', 'edit', 'voiceover'];
+
+/**
+ * Can the prompt/script feeding this stage be edited now? Before a job exists,
+ * yes; on a preview job, only after approval and until that stage (or a later
+ * one) has run. Jobs made without previews keep their inputs locked, as before.
+ */
+export function inputEditable(job: Job | null, stage: 'restyle' | 'edit' | 'voiceover'): boolean {
+  if (!job) return true;
+  if (!job.previewRequired || !job.approvedAttemptId || job.status === 'running') return false;
+  const ran = (s: StageName) => ['done', 'running'].includes(job.stages[s]?.status);
+  return INPUT_ORDER.slice(INPUT_ORDER.indexOf(stage)).every((s) => !ran(s));
 }
