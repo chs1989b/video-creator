@@ -18,7 +18,7 @@ export type StageNodeData = {
 };
 
 const titles: Record<Stage, string> = {
-  generate: '인물·제품 교체',
+  generate: '나머지 구간 생성',
   merge: '구간 이어붙이기',
   restyle: '의상·배경 교체',
   edit: '프롬프트 보정',
@@ -35,14 +35,26 @@ const runningText: Record<Stage, string> = {
 
 export function canRunStage(job: Job | null, stage: Stage): boolean {
   if (!job || job.status === 'running') return false;
+  if (stage === 'generate' && job.previewRequired && !job.approvedAttemptId) return false;
   const state = job.stages[stage];
   if (!state || state.status === 'skipped' || state.status === 'done') return false;
   const earlier = STAGE_ORDER.slice(0, STAGE_ORDER.indexOf(stage));
   return earlier.every((s) => ['done', 'skipped'].includes(job.stages[s]?.status));
 }
 
+/** "나머지 25초 만들기 · 약 175크레딧" — only the segments that still need generating. */
+function generateButtonLabel(job: Job | null, failed: boolean): string {
+  const pending = (job?.segments ?? []).filter((s) => s.status !== 'done');
+  if (pending.length === 0) return failed ? '이 단계 다시 실행' : '이 단계만 실행';
+  const seconds = Math.round(pending.reduce((sum, s) => sum + (s.endSeconds - s.startSeconds), 0));
+  return `나머지 ${seconds}초 만들기 · 약 ${seconds * 7}크레딧`;
+}
+
 function summarize(stage: Stage, job: Job | null): { text: string; tone: Tone } {
   if (!job) return { text: '입력을 채우고 실행하세요', tone: 'idle' };
+  if (stage === 'generate' && job.previewRequired && !job.approvedAttemptId) {
+    return { text: '미리보기를 승인하면 실행됩니다', tone: 'idle' };
+  }
   const state = job.stages[stage];
   if (!state) return { text: '대기', tone: 'idle' };
 
@@ -112,7 +124,9 @@ export function StageNode({ data }: NodeProps & { data: StageNodeData }) {
           onClick={data.onRun}
           className="mt-2 w-full rounded-md border border-[var(--card-border-strong)] py-1.5 text-[12.5px] font-medium text-[var(--ink)] transition-colors hover:border-[var(--media)] hover:text-[var(--media)]"
         >
-          {state?.status === 'failed' ? '이 단계 다시 실행' : '이 단계만 실행'}
+          {stage === 'generate'
+            ? generateButtonLabel(job, state?.status === 'failed')
+            : state?.status === 'failed' ? '이 단계 다시 실행' : '이 단계만 실행'}
         </button>
       ) : null}
     </NodeCard>

@@ -19,6 +19,8 @@ import { ImageInputNode, type ImageInputNodeData } from './nodes/ImageInputNode'
 import { TextInputNode, type TextInputNodeData } from './nodes/TextInputNode';
 import { StageNode, canRunStage, type StageNodeData } from './nodes/StageNode';
 import { ResultNode, type ResultNodeData } from './nodes/ResultNode';
+import { PreviewNode, type PreviewNodeData } from './nodes/PreviewNode';
+import { previewAllowed, unlockAllowed } from '../lib/previewRules';
 import {
   createJob,
   getJob,
@@ -26,9 +28,15 @@ import {
   runStage,
   resultUrl,
   stageOutputUrl,
+  runPreview,
+  sendVerdict,
+  unlockPreview,
+  attemptOutputUrl,
+  PREVIEW_CREDITS,
   STAGE_ORDER,
   type Job,
   type StageName,
+  type Verdict,
 } from '../lib/workerApi';
 
 const nodeTypes = {
@@ -37,6 +45,7 @@ const nodeTypes = {
   textInput: TextInputNode,
   stage: StageNode,
   result: ResultNode,
+  preview: PreviewNode,
 };
 
 type AnyNodeData =
@@ -44,7 +53,8 @@ type AnyNodeData =
   | ImageInputNodeData
   | TextInputNodeData
   | StageNodeData
-  | ResultNodeData;
+  | ResultNodeData
+  | PreviewNodeData;
 
 const POLL_INTERVAL_MS = 2000;
 const LAST_JOB_KEY = 'video-creator:last-job';
@@ -63,24 +73,26 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
     { id: 'video', type: 'videoInput', position: { x: 0, y: 40 }, data: { url: '', onUrlChange: noop, disabled: false } },
     { id: 'person', type: 'imageInput', position: { x: 20, y: 300 }, data: { title: '바꿀 인물', hint: '인물 사진', file: null, onFileChange: noop, disabled: false } },
     { id: 'product', type: 'imageInput', position: { x: 20, y: 560 }, data: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: null, onFileChange: noop, disabled: false } },
-    { id: 'generate', type: 'stage', position: { x: 340, y: 300 }, data: stage('generate') },
-    { id: 'merge', type: 'stage', position: { x: 630, y: 300 }, data: stage('merge') },
-    { id: 'restyle-prompt', type: 'textInput', position: { x: 630, y: 40 }, data: { title: '의상·배경 프롬프트', placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오', hint: '비우면 의상·배경은 그대로', value: '', onChange: noop, disabled: false } },
-    { id: 'restyle', type: 'stage', position: { x: 920, y: 300 }, data: stage('restyle') },
-    { id: 'edit-prompt', type: 'textInput', position: { x: 920, y: 560 }, data: { title: '보정 프롬프트', placeholder: '예: 조명을 더 따뜻하게', hint: '비우면 보정 없이 넘어갑니다', value: '', onChange: noop, disabled: false } },
-    { id: 'edit', type: 'stage', position: { x: 1210, y: 300 }, data: stage('edit') },
-    { id: 'script', type: 'textInput', position: { x: 1210, y: 40 }, data: { title: '나레이션 대본', placeholder: '영상에 얹을 말을 적어주세요', hint: '비우면 음성 없이 만듭니다', value: '', onChange: noop, disabled: false } },
-    { id: 'voiceover', type: 'stage', position: { x: 1500, y: 300 }, data: stage('voiceover') },
-    { id: 'result', type: 'result', position: { x: 1790, y: 270 }, data: { job: null, resultUrl: null } },
+    { id: 'preview', type: 'preview', position: { x: 340, y: 260 }, data: { job: null, onRunPreview: null, onVerdict: null, onUnlock: null, attemptUrl: () => '', previewCredits: PREVIEW_CREDITS } },
+    { id: 'generate', type: 'stage', position: { x: 630, y: 300 }, data: stage('generate') },
+    { id: 'merge', type: 'stage', position: { x: 920, y: 300 }, data: stage('merge') },
+    { id: 'restyle-prompt', type: 'textInput', position: { x: 920, y: 40 }, data: { title: '의상·배경 프롬프트', placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오', hint: '비우면 의상·배경은 그대로', value: '', onChange: noop, disabled: false } },
+    { id: 'restyle', type: 'stage', position: { x: 1210, y: 300 }, data: stage('restyle') },
+    { id: 'edit-prompt', type: 'textInput', position: { x: 1210, y: 560 }, data: { title: '보정 프롬프트', placeholder: '예: 조명을 더 따뜻하게', hint: '비우면 보정 없이 넘어갑니다', value: '', onChange: noop, disabled: false } },
+    { id: 'edit', type: 'stage', position: { x: 1500, y: 300 }, data: stage('edit') },
+    { id: 'script', type: 'textInput', position: { x: 1500, y: 40 }, data: { title: '나레이션 대본', placeholder: '영상에 얹을 말을 적어주세요', hint: '비우면 음성 없이 만듭니다', value: '', onChange: noop, disabled: false } },
+    { id: 'voiceover', type: 'stage', position: { x: 1790, y: 300 }, data: stage('voiceover') },
+    { id: 'result', type: 'result', position: { x: 2080, y: 270 }, data: { job: null, resultUrl: null } },
   ];
 }
 
 type EdgeSpec = { id: string; source: string; target: string; color: string; stage?: StageName };
 
 const edgeSpecs: EdgeSpec[] = [
-  { id: 'video-generate', source: 'video', target: 'generate', color: MEDIA, stage: 'generate' },
-  { id: 'person-generate', source: 'person', target: 'generate', color: MEDIA, stage: 'generate' },
-  { id: 'product-generate', source: 'product', target: 'generate', color: MEDIA, stage: 'generate' },
+  { id: 'video-preview', source: 'video', target: 'preview', color: MEDIA },
+  { id: 'person-preview', source: 'person', target: 'preview', color: MEDIA },
+  { id: 'product-preview', source: 'product', target: 'preview', color: MEDIA },
+  { id: 'preview-generate', source: 'preview', target: 'generate', color: QUIET, stage: 'generate' },
   { id: 'generate-merge', source: 'generate', target: 'merge', color: QUIET, stage: 'merge' },
   { id: 'merge-restyle', source: 'merge', target: 'restyle', color: QUIET, stage: 'restyle' },
   { id: 'restyle-prompt-restyle', source: 'restyle-prompt', target: 'restyle', color: TEXT, stage: 'restyle' },
@@ -97,7 +109,10 @@ function buildEdges(job: Job | null): Edge[] {
     source: e.source,
     target: e.target,
     style: { stroke: e.color },
-    className: job && e.stage && job.stages[e.stage]?.status === 'running' ? 'is-running' : undefined,
+    className:
+      job && ((e.stage && job.stages[e.stage]?.status === 'running') || (e.target === 'preview' && job.currentStage === 'preview'))
+        ? 'is-running'
+        : undefined,
   }));
 }
 
@@ -212,6 +227,7 @@ export function Canvas() {
           restylePrompt,
           editPrompt,
           autorun,
+          preview: true,
         });
         setJob(created);
         writeStorage(LAST_JOB_KEY, created.id);
@@ -227,9 +243,48 @@ export function Canvas() {
     [url, personFile, productFile, script, restylePrompt, editPrompt, startPolling],
   );
 
+  const handleRunPreview = useCallback(async () => {
+    setErrorMessage(null);
+    let target = job;
+    if (!target) {
+      target = await submit(false);
+      if (!target) return;
+    }
+    try {
+      await runPreview(target.id);
+      setJob({ ...target, status: 'running', currentStage: 'preview' });
+      startPolling(target.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '미리보기를 시작하지 못했습니다.');
+    }
+  }, [job, submit, startPolling]);
+
+  const handleVerdict = useCallback(
+    async (attemptId: string, verdict: Verdict, reasons: string[]) => {
+      if (!job) return;
+      setErrorMessage(null);
+      try {
+        setJob(await sendVerdict(job.id, attemptId, verdict, reasons));
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : '판정을 저장하지 못했습니다.');
+      }
+    },
+    [job],
+  );
+
+  const handleUnlock = useCallback(async () => {
+    if (!job) return;
+    if (!window.confirm(`미리보기 1회를 더 허용할까요? 약 ${PREVIEW_CREDITS}크레딧(약 ${(PREVIEW_CREDITS * 60).toLocaleString()}원)이 듭니다.`)) return;
+    try {
+      setJob(await unlockPreview(job.id));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '한도를 풀지 못했습니다.');
+    }
+  }, [job]);
+
   const handleRunAll = useCallback(async () => {
     if (!job) {
-      await submit(true);
+      await handleRunPreview();
       return;
     }
     setErrorMessage(null);
@@ -240,7 +295,7 @@ export function Canvas() {
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '이어서 실행하지 못했습니다.');
     }
-  }, [job, submit, startPolling]);
+  }, [job, handleRunPreview, startPolling]);
 
   const handleRunStage = useCallback(
     async (stage: StageName) => {
@@ -294,7 +349,7 @@ export function Canvas() {
       job,
       outputUrl: job && job.stages[stage]?.status === 'done' && stage !== 'generate' ? stageOutputUrl(job.id, stage) : null,
       onRun:
-        (!job && stage === 'generate' && !isSubmitting) || (job && canRunStage(job, stage))
+        job && canRunStage(job, stage)
           ? () => handleRunStage(stage)
           : null,
       onRetrySegment: stage === 'generate' && job ? handleRetrySegment : null,
@@ -333,8 +388,18 @@ export function Canvas() {
       edit: stageData('edit'),
       voiceover: stageData('voiceover'),
       result: { job, resultUrl: job?.status === 'done' ? resultUrl(job.id) : null },
+      preview: {
+        job,
+        onRunPreview: (!job && !isSubmitting) || (job && previewAllowed(job)) ? handleRunPreview : null,
+        onVerdict: job ? handleVerdict : null,
+        onUnlock: job && unlockAllowed(job) ? handleUnlock : null,
+        attemptUrl: (attemptId: string) => (job ? attemptOutputUrl(job.id, attemptId) : ''),
+        previewCredits: job?.segments[0]
+          ? Math.round((job.segments[0].endSeconds - job.segments[0].startSeconds) * 7)
+          : PREVIEW_CREDITS,
+      },
     };
-  }, [url, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment]);
+  }, [url, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock]);
 
   const renderNodes = useMemo(
     () => nodes.map((node) => ({ ...node, data: dataById[node.id] ?? node.data })),
@@ -347,23 +412,31 @@ export function Canvas() {
   );
 
   const remaining = job ? STAGE_ORDER.some((s) => ['pending', 'failed'].includes(job.stages[s]?.status)) : false;
+  const awaitingApproval = Boolean(job?.previewRequired && !job.approvedAttemptId);
   const runLabel = isSubmitting
     ? '보내는 중'
     : isRunning
       ? '만드는 중'
       : !job
-        ? '영상 만들기'
-        : job.status === 'done'
-          ? '완성됨'
-          : job.status === 'failed'
-            ? '실패한 단계부터 이어서'
-            : '남은 단계 모두 실행';
-  const runDisabled = locked || (job !== null && !remaining);
+        ? '5초 미리보기 만들기'
+        : awaitingApproval
+          ? '미리보기를 승인하세요'
+          : job.status === 'done'
+            ? '완성됨'
+            : job.status === 'failed'
+              ? '실패한 단계부터 이어서'
+              : '남은 단계 모두 실행';
+  const runDisabled = locked || awaitingApproval || (job !== null && !remaining);
 
   return (
     <div className="relative h-screen w-screen bg-[var(--canvas)]">
-      <div className="pointer-events-none absolute left-5 top-4 z-10 text-[13px] font-medium text-[var(--ink)]">
-        얼굴·제품 교체 워크플로
+      <div className="pointer-events-none absolute left-5 top-4 z-10 flex items-center gap-3 text-[13px] font-medium text-[var(--ink)]">
+        <span>얼굴·제품 교체 워크플로</span>
+        {job?.previewRequired && job.totals && (
+          <span className="rounded-full border border-[var(--card-border-strong)] bg-[var(--card)] px-2.5 py-1 text-[12px] font-normal text-[var(--ink-muted)]">
+            미리보기 {job.totals.previews}회 · {job.totals.credits}크레딧 · 약 {job.totals.krw.toLocaleString()}원
+          </span>
+        )}
       </div>
 
       <div className="absolute right-5 top-4 z-10 flex items-center gap-2">
