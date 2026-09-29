@@ -15,7 +15,7 @@ export async function splitIntoSegments(
   filePath,
   outputDir,
   segmentSeconds = 10,
-  { execFile = defaultExecFile, duration } = {},
+  { execFile = defaultExecFile, duration, firstSegmentSeconds } = {},
 ) {
   const totalDuration = duration ?? (await getDuration(filePath, { execFile }));
 
@@ -24,10 +24,15 @@ export async function splitIntoSegments(
   // files. The epsilon guard avoids spawning a phantom near-zero final chunk
   // when floating-point drift puts totalDuration a hair past a clean multiple
   // of segmentSeconds (e.g. 30.000001 with segmentSeconds=10).
+  // The preview flow cuts a shorter first segment (firstSegmentSeconds) so a
+  // cheap preview of it can be generated and, once approved, reused as-is.
   const chunks = [];
-  for (let start = 0; start < totalDuration - 1e-6; start += segmentSeconds) {
-    const length = Math.min(segmentSeconds, totalDuration - start);
+  let start = 0;
+  while (start < totalDuration - 1e-6) {
+    const size = chunks.length === 0 && firstSegmentSeconds ? firstSegmentSeconds : segmentSeconds;
+    const length = Math.min(size, totalDuration - start);
     chunks.push({ start, length });
+    start += length;
   }
 
   // Higgsfield's engine has a 4-second minimum clip length. A trailing remainder

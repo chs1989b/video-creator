@@ -84,3 +84,43 @@ test('splitIntoSegments does not spawn a phantom near-zero final segment from fl
 
   assert.equal(segments.length, 3);
 });
+
+test('splitIntoSegments can cut a shorter first segment for the preview', async () => {
+  const calls = [];
+  const fakeExecFile = async (command, args) => {
+    calls.push({ command, args });
+    return { stdout: '', stderr: '' };
+  };
+
+  const segments = await splitIntoSegments('/tmp/source.mp4', '/tmp/job1', 10, {
+    execFile: fakeExecFile,
+    duration: 30,
+    firstSegmentSeconds: 5,
+  });
+
+  assert.deepEqual(
+    segments.map((s) => [s.startSeconds, s.endSeconds]),
+    [[0, 5], [5, 15], [15, 25], [25, 30]],
+  );
+  const lengthOf = (args) => args[args.indexOf('-t') + 1];
+  assert.deepEqual(calls.map((c) => lengthOf(c.args)), ['5', '10', '10', '5']);
+});
+
+test('a short video with a preview cut folds the under-4-second remainder into the first segment', async () => {
+  const fakeExecFile = async () => ({ stdout: '', stderr: '' });
+
+  const sevenSeconds = await splitIntoSegments('/tmp/source.mp4', '/tmp/job1', 10, {
+    execFile: fakeExecFile, duration: 7, firstSegmentSeconds: 5,
+  });
+  assert.deepEqual(sevenSeconds.map((s) => [s.startSeconds, s.endSeconds]), [[0, 7]]);
+
+  const sixteenSeconds = await splitIntoSegments('/tmp/source.mp4', '/tmp/job1', 10, {
+    execFile: fakeExecFile, duration: 16, firstSegmentSeconds: 5,
+  });
+  assert.deepEqual(sixteenSeconds.map((s) => [s.startSeconds, s.endSeconds]), [[0, 5], [5, 16]]);
+
+  const underFive = await splitIntoSegments('/tmp/source.mp4', '/tmp/job1', 10, {
+    execFile: fakeExecFile, duration: 4.5, firstSegmentSeconds: 5,
+  });
+  assert.deepEqual(underFive.map((s) => [s.startSeconds, s.endSeconds]), [[0, 4.5]]);
+});
