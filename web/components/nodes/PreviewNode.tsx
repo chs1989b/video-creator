@@ -3,9 +3,9 @@
 import { useState } from 'react';
 import type { NodeProps } from '@xyflow/react';
 import type { Attempt, Job, Verdict } from '../../lib/workerApi';
-import { REJECT_REASONS, usedPreviews } from '../../lib/workerApi';
-import { latestAttempt } from '../../lib/previewRules';
-import { NodeCard, type Tone } from './NodeCard';
+import { REJECT_REASONS } from '../../lib/workerApi';
+import { latestAttempt, previewStatus } from '../../lib/previewRules';
+import { NodeCard } from './NodeCard';
 
 export type PreviewNodeData = {
   job: Job | null;
@@ -18,16 +18,6 @@ export type PreviewNodeData = {
   previewCredits: number;
 };
 
-function summarize(job: Job | null): { text: string; tone: Tone } {
-  if (!job) return { text: '입력을 채우고 5초 미리보기를 만드세요', tone: 'idle' };
-  if (!job.previewRequired) return { text: '미리보기 없이 만든 작업', tone: 'idle' };
-  if (job.status === 'running' && job.currentStage === 'preview') return { text: '5초 미리보기 만드는 중', tone: 'active' };
-  if (job.approvedAttemptId) return { text: `승인됨 · 미리보기 ${usedPreviews(job)}회`, tone: 'done' };
-  const latest = latestAttempt(job);
-  if (latest?.status === 'failed') return { text: latest.error ?? '미리보기 실패', tone: 'failed' };
-  return { text: `${usedPreviews(job)} / ${job.previewLimit}회 사용`, tone: job.attempts.length ? 'active' : 'idle' };
-}
-
 function pastLabel(a: Attempt): string {
   if (a.status === 'failed') return `${a.n}회 · 실패 (0크레딧)`;
   if (a.verdict === 'reject') return `${a.n}회 · 거절${a.reasons.length ? ` (${a.reasons.join(', ')})` : ''}`;
@@ -38,7 +28,7 @@ function pastLabel(a: Attempt): string {
 export function PreviewNode({ data }: NodeProps & { data: PreviewNodeData }) {
   const { job } = data;
   const [reasons, setReasons] = useState<string[]>([]);
-  const { text, tone } = summarize(job);
+  const { text, tone } = previewStatus(job);
   const latest = latestAttempt(job);
   const judging = Boolean(
     job && latest && latest.status === 'done' && latest.verdict === null && !job.approvedAttemptId && job.status !== 'running',

@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { previewAllowed, unlockAllowed } from '../lib/previewRules';
+import { previewAllowed, unlockAllowed, previewStatus } from '../lib/previewRules';
 import type { Attempt, Job } from '../lib/workerApi';
 
 const attempt = (n: number, status: Attempt['status'], verdict: Attempt['verdict'] = null): Attempt => ({
@@ -43,4 +43,21 @@ test('at the limit, previews stop and one more can be unlocked once the last one
   const lastUnjudged = [1, 2, 3, 4].map((n) => attempt(n, 'done', 'reject')).concat(attempt(5, 'done'));
   expect(unlockAllowed(job({ attempts: lastUnjudged }))).toBe(false);
   expect(unlockAllowed(job({ attempts: fiveRejected, approvedAttemptId: 'a5' }))).toBe(false);
+});
+
+test('the preview card explains a failure that happened before any preview existed', () => {
+  const failedPrep = job({ status: 'failed', error: 'yt-dlp: unable to download', attempts: [] });
+  expect(previewStatus(failedPrep)).toEqual({ text: 'yt-dlp: unable to download', tone: 'failed' });
+  expect(previewStatus(job({ status: 'failed', error: null, attempts: [] }))).toEqual({ text: '영상 준비 실패', tone: 'failed' });
+  expect(previewAllowed(failedPrep)).toBe(true); // the user can try again
+});
+
+test('the preview card states', () => {
+  expect(previewStatus(null)).toEqual({ text: '입력을 채우고 5초 미리보기를 만드세요', tone: 'idle' });
+  expect(previewStatus(job({ previewRequired: false }))).toEqual({ text: '미리보기 없이 만든 작업', tone: 'idle' });
+  expect(previewStatus(job({ status: 'running', currentStage: 'preview' }))).toEqual({ text: '5초 미리보기 만드는 중', tone: 'active' });
+  expect(previewStatus(job())).toEqual({ text: '0 / 5회 사용', tone: 'idle' });
+  expect(previewStatus(job({ attempts: [attempt(1, 'failed')] }))).toEqual({ text: '미리보기 실패', tone: 'failed' });
+  expect(previewStatus(job({ approvedAttemptId: 'a2', attempts: [attempt(1, 'done', 'reject'), attempt(2, 'done', 'approve')] })))
+    .toEqual({ text: '승인됨 · 미리보기 2회', tone: 'done' });
 });
