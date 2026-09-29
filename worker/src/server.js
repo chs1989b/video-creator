@@ -172,25 +172,44 @@ export function createApp({
     { name: 'productImages', maxCount: 1 },
   ]);
 
+  // A preview costs credits, so two requests racing past the status check
+  // (a double click) must not both start one. The mark is taken before the
+  // first await and released when the preview ends.
+  const previewInFlight = new Set();
+
   // Preview: generate only the first (5-second) segment. Runs in the background.
   app.post('/jobs/:id/previews', previewUploads, async (req, res) => {
-    const job = await getJob(db, req.params.id);
-    if (!job) {
-      res.status(404).json({ error: 'not found' });
+    const { id } = req.params;
+    if (previewInFlight.has(id)) {
+      res.status(409).json({ error: 'a preview is already starting' });
       return;
     }
-    const blocker = previewBlocker(job);
-    if (blocker) {
-      res.status(409).json({ error: blocker });
-      return;
+    previewInFlight.add(id);
+    let started = false;
+    try {
+      const job = await getJob(db, id);
+      if (!job) {
+        res.status(404).json({ error: 'not found' });
+        return;
+      }
+      const blocker = previewBlocker(job);
+      if (blocker) {
+        res.status(409).json({ error: blocker });
+        return;
+      }
+      const options = {
+        prompt: optionalText(req.body.prompt),
+        characterImagePath: req.files?.characterImages?.[0]?.path ?? null,
+        productImagePath: req.files?.productImages?.[0]?.path ?? null,
+      };
+      const run = Promise.resolve(runPreview(db, job.id, workDirFor(job.id), options))
+        .finally(() => previewInFlight.delete(id));
+      started = true;
+      startInBackground(`Job ${job.id} preview`, run);
+      res.status(202).json({ ok: true });
+    } finally {
+      if (!started) previewInFlight.delete(id);
     }
-    const options = {
-      prompt: optionalText(req.body.prompt),
-      characterImagePath: req.files?.characterImages?.[0]?.path ?? null,
-      productImagePath: req.files?.productImages?.[0]?.path ?? null,
-    };
-    startInBackground(`Job ${job.id} preview`, runPreview(db, job.id, workDirFor(job.id), options));
-    res.status(202).json({ ok: true });
   });
 
   app.post('/jobs/:id/previews/unlock', async (req, res) => {

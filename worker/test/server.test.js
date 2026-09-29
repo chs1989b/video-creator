@@ -350,3 +350,27 @@ test('verdict, unlock, attempt output and estimate routes', async () => {
     server.close();
   }
 });
+
+test('two preview requests at once start only one preview', async () => {
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  let calls = 0;
+  const { server, baseUrl } = await startTestServer({
+    runPreview: async () => { calls += 1; await gate; },
+  });
+  try {
+    const { job } = await createPreviewJob(baseUrl);
+    const post = () => fetch(`${baseUrl}/jobs/${job.id}/previews`, { method: 'POST', body: new FormData() });
+    const [first, second] = await Promise.all([post(), post()]);
+    assert.deepEqual([first.status, second.status].sort(), [202, 409]);
+    assert.equal(calls, 1);
+
+    release();
+    await new Promise((r) => setTimeout(r, 20));
+    const after = await post();
+    assert.equal(after.status, 202); // the lock is released once the preview ends
+  } finally {
+    release();
+    server.close();
+  }
+});
