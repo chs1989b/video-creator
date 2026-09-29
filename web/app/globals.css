@@ -2,18 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --canvas: #050505;
-  --grid: #1b1b1e;
-  --card: #121214;
-  --card-border: #26262a;
-  --card-border-strong: #3a3a40;
-  --ink: #ececee;
-  --ink-muted: #8b8b94;
-  --ink-faint: #55555d;
-  --media: #27c48a;
-  --text-edge: #e6c84a;
-  --danger: #e25b4f;
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --canvas: #070709;
+  --grid: #26262b;
+  --card: #1b1b20;
+  --card-border: #3a3a42;
+  --card-border-strong: #55555f;
+  --pill: rgba(27, 27, 32, 0.88);
+  --well: #000000;
+  --ink: #f4f4f6;
+  --ink-muted: #b4b4be;
+  --ink-faint: #7c7c88;
+  --media: #35d999;
+  --text-edge: #f0d35a;
+  --danger: #ef6a5e;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --canvas: #f2f2f0;
+  --grid: #d4d4d0;
+  --card: #ffffff;
+  --card-border: #d0d0cc;
+  --card-border-strong: #a9a9a4;
+  --pill: rgba(255, 255, 255, 0.92);
+  --well: #eaeae7;
+  --ink: #17171a;
+  --ink-muted: #5b5b64;
+  --ink-faint: #8d8d96;
+  --media: #128a5d;
+  --text-edge: #a9840a;
+  --danger: #c93f33;
 }
 
 html,
@@ -39,7 +60,7 @@ body {
 }
 
 .react-flow__edge-path {
-  stroke-width: 1.5;
+  stroke-width: 2.25;
 }
 
 .react-flow__edge.is-running .react-flow__edge-path {
@@ -60,9 +81,9 @@ body {
 }
 
 .react-flow__handle {
-  width: 8px;
-  height: 8px;
-  border-width: 1.5px;
+  width: 10px;
+  height: 10px;
+  border-width: 2px;
   border-color: var(--canvas);
 }
 

@@ -22,12 +22,12 @@ export function ResultNode({ data }: NodeProps & { data: ResultNodeData }) {
 
   return (
     <NodeCard title="완성 영상" width={260} tone={tone} input>
-      <div className="aspect-video w-full overflow-hidden rounded-md bg-black">
+      <div className="aspect-video w-full overflow-hidden rounded-md bg-[var(--well)]">
         {isDone ? (
           // eslint-disable-next-line jsx-a11y/media-has-caption
           <video src={data.resultUrl!} controls className="h-full w-full object-cover" />
         ) : (
-          <div className="flex h-full items-center justify-center text-[11px] text-[var(--ink-faint)]">
+          <div className="flex h-full items-center justify-center text-[12.5px] text-[var(--ink-muted)]">
             {data.job?.status === 'failed' ? '만들지 못했습니다' : '아직 없음'}
           </div>
         )}
@@ -36,7 +36,7 @@ export function ResultNode({ data }: NodeProps & { data: ResultNodeData }) {
         <button
           type="button"
           onClick={() => handleDownload(data.resultUrl!, data.job!.id)}
-          className="mt-2 w-full rounded-md border border-[var(--card-border)] py-1.5 text-[12px] text-[var(--ink)] transition-colors hover:border-[var(--media)] hover:text-[var(--media)]"
+          className="mt-2 w-full rounded-md border border-[var(--card-border-strong)] py-1.5 text-[13px] text-[var(--ink)] transition-colors hover:border-[var(--media)] hover:text-[var(--media)]"
         >
           mp4 저장
         </button>

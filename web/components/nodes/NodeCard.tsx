@@ -41,26 +41,26 @@ export function NodeCard({
   return (
     <div
       style={{ width, borderColor: tone === 'idle' ? 'var(--card-border)' : accent }}
-      className="relative rounded-[10px] border bg-[var(--card)] shadow-[0_8px_30px_rgba(0,0,0,0.55)]"
+      className="relative rounded-[10px] border bg-[var(--card)] shadow-[0_10px_34px_rgba(0,0,0,0.7)]"
     >
       {input && (
         <Handle
           type="target"
           position={Position.Left}
-          style={{ background: 'var(--ink-faint)' }}
+          style={{ background: 'var(--ink-muted)' }}
         />
       )}
-      <div className="flex items-center justify-between px-2.5 pt-2 pb-1">
-        <span className="text-[11px] text-[var(--ink-muted)]">{title}</span>
+      <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
+        <span className="text-[12.5px] font-medium text-[var(--ink)]">{title}</span>
         {tone !== 'idle' && (
           <span
             aria-hidden
-            className="h-1.5 w-1.5 rounded-full"
+            className="h-2 w-2 rounded-full"
             style={{ background: accent }}
           />
         )}
       </div>
-      <div className="px-2.5 pb-2.5">{children}</div>
+      <div className="px-3 pb-3">{children}</div>
       {output && (
         <Handle
           type="source"

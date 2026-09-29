@@ -22,12 +22,12 @@ export function ImageInputNode({ data }: NodeProps & { data: ImageInputNodeData 
   return (
     <NodeCard title={data.title} width={180} output outputColor="var(--media)">
       <label className="block cursor-pointer">
-        <div className="mb-2 aspect-square w-full overflow-hidden rounded-md bg-black">
+        <div className="mb-2 aspect-square w-full overflow-hidden rounded-md bg-[var(--well)]">
           {previewUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={previewUrl} alt="" className="h-full w-full object-cover" />
           ) : (
-            <div className="flex h-full items-center justify-center px-3 text-center text-[11px] leading-snug text-[var(--ink-faint)]">
+            <div className="flex h-full items-center justify-center px-3 text-center text-[12.5px] leading-snug text-[var(--ink-muted)]">
               {data.hint}
             </div>
           )}
@@ -39,7 +39,7 @@ export function ImageInputNode({ data }: NodeProps & { data: ImageInputNodeData 
           onChange={(e) => data.onFileChange(e.target.files?.[0] ?? null)}
           className="sr-only"
         />
-        <span className="block truncate text-[11px] text-[var(--ink-muted)]">
+        <span className="block truncate text-[12px] text-[var(--ink-muted)]">
           {data.file ? data.file.name : '이미지 선택'}
         </span>
       </label>

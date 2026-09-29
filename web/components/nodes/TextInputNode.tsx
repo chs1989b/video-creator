@@ -22,9 +22,9 @@ export function TextInputNode({ data }: NodeProps & { data: TextInputNodeData })
         value={data.value}
         disabled={data.disabled}
         onChange={(e) => data.onChange(e.target.value)}
-        className="w-full resize-none rounded-md border border-[var(--card-border)] bg-black px-2 py-1.5 text-[12px] leading-relaxed text-[var(--ink)] placeholder:text-[var(--ink-faint)] disabled:opacity-50"
+        className="w-full resize-none rounded-md border border-[var(--card-border)] bg-[var(--well)] px-2 py-1.5 text-[13px] leading-relaxed text-[var(--ink)] placeholder:text-[var(--ink-faint)] disabled:opacity-50"
       />
-      <div className="mt-1 text-[11px] text-[var(--ink-faint)]">{data.hint}</div>
+      <div className="mt-1.5 text-[12px] text-[var(--ink-muted)]">{data.hint}</div>
     </NodeCard>
   );
 }
