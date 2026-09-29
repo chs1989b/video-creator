@@ -1,6 +1,7 @@
 import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { initialStages } from './stages.js';
+import { PREVIEW_LIMIT } from './costs.js';
 
 export function createDb(dbPath) {
   const adapter = new JSONFile(dbPath);
@@ -30,6 +31,7 @@ export async function createJob(
     script = null,
     restylePrompt = null,
     editPrompt = null,
+    previewRequired = false,
   },
 ) {
   return serialize(async () => {
@@ -47,6 +49,11 @@ export async function createJob(
       status: 'idle',
       currentStage: null,
       stages: initialStages({ restylePrompt, editPrompt, script }),
+      previewRequired,
+      previewLimit: PREVIEW_LIMIT,
+      attempts: [],
+      approvedAttemptId: null,
+      generatePrompt: null,
       segments: [],
       resultPath: null,
       error: null,
@@ -59,11 +66,17 @@ export async function createJob(
   });
 }
 
+// Jobs written before the preview flow carry no preview fields; they behave
+// exactly as before (no preview required).
+function withPreviewDefaults(job) {
+  return { previewRequired: false, previewLimit: PREVIEW_LIMIT, attempts: [], approvedAttemptId: null, generatePrompt: null, ...job };
+}
+
 // Jobs written before the per-stage model carry a flat status and no `stages`.
 // Give them a stage record derived from what is known (their segments) so the
 // runner and the canvas can treat every job the same way.
 function normalizeJob(job) {
-  if (job.stages) return job;
+  if (job.stages) return withPreviewDefaults(job);
   const stages = initialStages(job);
   const allDone = job.segments.length > 0 && job.segments.every((s) => s.status === 'done');
   if (allDone) stages.generate.status = 'done';
@@ -72,13 +85,13 @@ function normalizeJob(job) {
   if (legacyDone) {
     for (const s of Object.values(stages)) if (s.status !== 'skipped') s.status = 'done';
   }
-  return {
+  return withPreviewDefaults({
     ...job,
     stages,
     currentStage: null,
     status: legacyDone ? 'done' : job.status === 'failed' || job.error ? 'failed' : 'idle',
     error: job.error ?? null,
-  };
+  });
 }
 
 export async function getJob(db, id) {
