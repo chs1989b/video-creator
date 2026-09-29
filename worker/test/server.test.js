@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/server.js';
+import { createDb, updateJob } from '../src/pipeline/db.js';
 
 async function startTestServer(overrides = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'server-test-'));
@@ -12,11 +13,21 @@ async function startTestServer(overrides = {}) {
     runJob: overrides.runJob ?? (async () => ({ resultPath: '/tmp/final.mp4' })),
     runStage: overrides.runStage ?? (async (_db, _id, _dir, stage) => ({ stage })),
     retrySegment: overrides.retrySegment ?? (async () => ({ outputPath: '/tmp/generated-0.mp4' })),
+    ...(overrides.runPreview ? { runPreview: overrides.runPreview } : {}),
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const port = server.address().port;
-  return { server, baseUrl: `http://localhost:${port}` };
+  return { server, baseUrl: `http://localhost:${port}`, dataDir };
+}
+
+async function createPreviewJob(baseUrl) {
+  const form = new FormData();
+  form.append('youtubeUrl', 'https://example.com/v.mp4');
+  form.append('characterImages', new Blob([new Uint8Array([1, 2, 3])]), 'char.png');
+  form.append('preview', 'true');
+  const res = await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form });
+  return { res, job: await res.json() };
 }
 
 test('POST /jobs creates a job and GET /jobs lists it', async () => {
@@ -221,6 +232,119 @@ test('GET /jobs/:id returns 404 for an unknown job', async () => {
   try {
     const res = await fetch(`${baseUrl}/jobs/does-not-exist`);
     assert.equal(res.status, 404);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /jobs with preview=true makes a preview job, does not autorun, and reports totals', async () => {
+  let runJobCalls = 0;
+  const { server, baseUrl } = await startTestServer({ runJob: async () => { runJobCalls += 1; } });
+  try {
+    const { res, job } = await createPreviewJob(baseUrl);
+    assert.equal(res.status, 201);
+    assert.equal(job.previewRequired, true);
+    assert.deepEqual(job.totals, { previews: 0, credits: 0, krw: 0 });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(runJobCalls, 0);
+
+    const got = await (await fetch(`${baseUrl}/jobs/${job.id}`)).json();
+    assert.deepEqual(got.totals, { previews: 0, credits: 0, krw: 0 });
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /jobs/:id/previews starts a preview with the prompt; non-preview jobs get 409', async () => {
+  const calls = [];
+  const { server, baseUrl } = await startTestServer({
+    runPreview: async (_db, id, _dir, options) => { calls.push({ id, ...options }); },
+  });
+  try {
+    const { job } = await createPreviewJob(baseUrl);
+    const form = new FormData();
+    form.append('prompt', '  Keep her smile.  ');
+    const res = await fetch(`${baseUrl}/jobs/${job.id}/previews`, { method: 'POST', body: form });
+    assert.equal(res.status, 202);
+    assert.deepEqual(calls, [{ id: job.id, prompt: 'Keep her smile.', characterImagePath: null, productImagePath: null }]);
+
+    const plain = new FormData();
+    plain.append('youtubeUrl', 'https://example.com/v.mp4');
+    plain.append('characterImages', new Blob([new Uint8Array([1])]), 'c.png');
+    plain.append('autorun', 'false');
+    const plainJob = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: plain })).json();
+    const refused = await fetch(`${baseUrl}/jobs/${plainJob.id}/previews`, { method: 'POST', body: new FormData() });
+    assert.equal(refused.status, 409);
+    assert.match((await refused.json()).error, /does not use previews/);
+
+    const missing = await fetch(`${baseUrl}/jobs/nope/previews`, { method: 'POST', body: new FormData() });
+    assert.equal(missing.status, 404);
+  } finally {
+    server.close();
+  }
+});
+
+test('before approval, /run and /stages/generate/run answer 409 and start nothing', async () => {
+  let started = 0;
+  const { server, baseUrl } = await startTestServer({
+    runJob: async () => { started += 1; },
+    runStage: async () => { started += 1; },
+  });
+  try {
+    const { job } = await createPreviewJob(baseUrl);
+    const run = await fetch(`${baseUrl}/jobs/${job.id}/run`, { method: 'POST' });
+    assert.equal(run.status, 409);
+    assert.match((await run.json()).error, /approve a preview/);
+    const stage = await fetch(`${baseUrl}/jobs/${job.id}/stages/generate/run`, { method: 'POST' });
+    assert.equal(stage.status, 409);
+    assert.equal(started, 0);
+  } finally {
+    server.close();
+  }
+});
+
+test('verdict, unlock, attempt output and estimate routes', async () => {
+  const { server, baseUrl, dataDir } = await startTestServer();
+  try {
+    const { job } = await createPreviewJob(baseUrl);
+    const previewFile = path.join(dataDir, 'preview-1.mp4');
+    await fs.writeFile(previewFile, 'fake-video');
+    const db = createDb(path.join(dataDir, 'db.json'));
+    await updateJob(db, job.id, {
+      segments: [
+        { index: 0, path: '/tmp/s0.mp4', startSeconds: 0, endSeconds: 5, status: 'pending', resultPath: null, error: null, credits: null },
+        { index: 1, path: '/tmp/s1.mp4', startSeconds: 5, endSeconds: 15, status: 'pending', resultPath: null, error: null, credits: null },
+      ],
+      attempts: [{
+        id: 'a1', n: 1, kind: 'preview', prompt: null, characterImagePath: '/tmp/c.png', productImagePath: null,
+        segmentIndex: 0, status: 'done', outputPath: previewFile, estimatedCredits: 35, credits: 35,
+        verdict: null, reasons: [], error: null, createdAt: '2026-09-29T00:00:00.000Z', finishedAt: '2026-09-29T00:01:00.000Z',
+      }],
+    });
+
+    const video = await fetch(`${baseUrl}/jobs/${job.id}/attempts/a1/output`);
+    assert.equal(video.status, 200);
+    assert.equal(await video.text(), 'fake-video');
+
+    const unlocked = await (await fetch(`${baseUrl}/jobs/${job.id}/previews/unlock`, { method: 'POST' })).json();
+    assert.equal(unlocked.previewLimit, 6);
+
+    const verdictRes = await fetch(`${baseUrl}/jobs/${job.id}/attempts/a1/verdict`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verdict: 'approve' }),
+    });
+    assert.equal(verdictRes.status, 200);
+    const approved = await verdictRes.json();
+    assert.equal(approved.approvedAttemptId, 'a1');
+    assert.deepEqual(approved.totals, { previews: 1, credits: 35, krw: 2100 });
+
+    const again = await fetch(`${baseUrl}/jobs/${job.id}/attempts/a1/verdict`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ verdict: 'approve' }),
+    });
+    assert.equal(again.status, 409);
+
+    const estimate = await (await fetch(`${baseUrl}/jobs/${job.id}/estimate`)).json();
+    assert.deepEqual(estimate.items, [{ stage: 'generate', credits: 70 }]);
+    assert.equal(estimate.krw, 4200);
   } finally {
     server.close();
   }

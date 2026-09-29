@@ -10,7 +10,16 @@ import {
   runJob as defaultRunJob,
   runStage as defaultRunStage,
   retrySegment as defaultRetrySegment,
+  nextStage,
+  APPROVAL_REQUIRED,
 } from './pipeline/jobRunner.js';
+import {
+  runPreview as defaultRunPreview,
+  recordVerdict as defaultRecordVerdict,
+  unlockPreview as defaultUnlockPreview,
+  previewBlocker,
+} from './pipeline/preview.js';
+import { jobTotals, estimateRemaining } from './pipeline/costs.js';
 import { STAGE_ORDER } from './pipeline/stages.js';
 
 function optionalText(value) {
@@ -22,9 +31,16 @@ export function createApp({
   runJob = defaultRunJob,
   runStage = defaultRunStage,
   retrySegment = defaultRetrySegment,
+  runPreview = defaultRunPreview,
+  recordVerdict = defaultRecordVerdict,
+  unlockPreview = defaultUnlockPreview,
 }) {
   const app = express();
   app.use(cors());
+  app.use(express.json());
+
+  const withTotals = (job) => ({ ...job, totals: jobTotals(job) });
+  const needsApproval = (job) => job.previewRequired && !job.approvedAttemptId;
 
   const db = createDb(path.join(dataDir, 'db.json'));
   const uploadsDir = path.join(dataDir, 'uploads');
@@ -71,22 +87,23 @@ export function createApp({
     const script = optionalText(req.body.script);
     const restylePrompt = optionalText(req.body.restylePrompt);
     const editPrompt = optionalText(req.body.editPrompt);
+    const previewRequired = req.body.preview === 'true';
     const job = await createJob(db, {
-      id, youtubeUrl, characterImagePaths, productImagePaths, script, restylePrompt, editPrompt,
+      id, youtubeUrl, characterImagePaths, productImagePaths, script, restylePrompt, editPrompt, previewRequired,
     });
 
     await fs.mkdir(workDirFor(id), { recursive: true });
 
     // autorun=false creates the job and waits for stage-by-stage requests.
-    if (req.body.autorun !== 'false') {
+    if (req.body.autorun !== 'false' && !previewRequired) {
       startInBackground(`Job ${id}`, runJob(db, id, workDirFor(id)));
     }
 
-    res.status(201).json(job);
+    res.status(201).json(withTotals(job));
   });
 
   app.get('/jobs', async (_req, res) => {
-    res.json(await listJobs(db));
+    res.json((await listJobs(db)).map(withTotals));
   });
 
   app.get('/jobs/:id', async (req, res) => {
@@ -95,7 +112,7 @@ export function createApp({
       res.status(404).json({ error: 'not found' });
       return;
     }
-    res.json(job);
+    res.json(withTotals(job));
   });
 
   // Resume: runs every stage that is not done yet, in order.
@@ -107,6 +124,10 @@ export function createApp({
     }
     if (job.status === 'running') {
       res.status(409).json({ error: 'job is already running' });
+      return;
+    }
+    if (needsApproval(job) && nextStage(job) === 'generate') {
+      res.status(409).json({ error: APPROVAL_REQUIRED });
       return;
     }
     startInBackground(`Job ${job.id}`, runJob(db, job.id, workDirFor(job.id)));
@@ -129,6 +150,10 @@ export function createApp({
       res.status(409).json({ error: 'job is already running' });
       return;
     }
+    if (stage === 'generate' && needsApproval(job)) {
+      res.status(409).json({ error: APPROVAL_REQUIRED });
+      return;
+    }
     const earlier = STAGE_ORDER.slice(0, STAGE_ORDER.indexOf(stage));
     if (!earlier.every((s) => ['done', 'skipped'].includes(job.stages[s]?.status))) {
       res.status(409).json({ error: `stage ${stage} needs the earlier stages to finish first` });
@@ -140,6 +165,77 @@ export function createApp({
     }
     startInBackground(`Job ${id} stage ${stage}`, runStage(db, id, workDirFor(id), stage));
     res.status(202).json({ ok: true, stage });
+  });
+
+  const previewUploads = upload.fields([
+    { name: 'characterImages', maxCount: 1 },
+    { name: 'productImages', maxCount: 1 },
+  ]);
+
+  // Preview: generate only the first (5-second) segment. Runs in the background.
+  app.post('/jobs/:id/previews', previewUploads, async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const blocker = previewBlocker(job);
+    if (blocker) {
+      res.status(409).json({ error: blocker });
+      return;
+    }
+    const options = {
+      prompt: optionalText(req.body.prompt),
+      characterImagePath: req.files?.characterImages?.[0]?.path ?? null,
+      productImagePath: req.files?.productImages?.[0]?.path ?? null,
+    };
+    startInBackground(`Job ${job.id} preview`, runPreview(db, job.id, workDirFor(job.id), options));
+    res.status(202).json({ ok: true });
+  });
+
+  app.post('/jobs/:id/previews/unlock', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json(withTotals(await unlockPreview(db, job.id)));
+  });
+
+  app.post('/jobs/:id/attempts/:attemptId/verdict', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    try {
+      const updated = await recordVerdict(db, job.id, req.params.attemptId, {
+        verdict: req.body?.verdict,
+        reasons: Array.isArray(req.body?.reasons) ? req.body.reasons : [],
+      });
+      res.json(withTotals(updated));
+    } catch (error) {
+      res.status(409).json({ error: error.message });
+    }
+  });
+
+  app.get('/jobs/:id/attempts/:attemptId/output', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    const attempt = job?.attempts.find((a) => a.id === req.params.attemptId);
+    if (!attempt?.outputPath) {
+      res.status(404).json({ error: 'preview not ready' });
+      return;
+    }
+    res.sendFile(attempt.outputPath);
+  });
+
+  app.get('/jobs/:id/estimate', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.json(estimateRemaining(job));
   });
 
   app.post('/jobs/:id/segments/:index/retry', async (req, res) => {
