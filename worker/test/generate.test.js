@@ -240,3 +240,38 @@ test('generateFromSegment falls back to the original error when no matching job 
   );
   assert.equal(calls.length, 3, 'recovery is attempted even for non-timeout errors, but finds nothing');
 });
+
+test('generateFromSegment sends a caller-supplied prompt instead of the default wording', async () => {
+  const calls = [];
+  const fakeExecFile = async (command, args) => {
+    calls.push({ command, args });
+    if (command === 'higgsfield') {
+      return { stdout: JSON.stringify([{ id: 'job-p', status: 'completed', result_url: 'https://example.com/p.mp4' }]), stderr: '' };
+    }
+    return { stdout: '', stderr: '' };
+  };
+
+  await generateFromSegment('/tmp/j/segment-000.mp4', '/tmp/j/char.png', '/tmp/j/preview-1.mp4', {
+    execFile: fakeExecFile,
+    prompt: 'Replace the person with the reference; keep her smile.',
+  });
+
+  const hf = calls.find((c) => c.command === 'higgsfield');
+  assert.equal(hf.args[hf.args.indexOf('--prompt') + 1], 'Replace the person with the reference; keep her smile.');
+});
+
+test('generateFromSegment falls back to the default prompt when none is given', async () => {
+  const calls = [];
+  const fakeExecFile = async (command, args) => {
+    calls.push({ command, args });
+    if (command === 'higgsfield') {
+      return { stdout: JSON.stringify([{ id: 'job-d', status: 'completed', result_url: 'https://example.com/d.mp4' }]), stderr: '' };
+    }
+    return { stdout: '', stderr: '' };
+  };
+
+  await generateFromSegment('/tmp/j/segment-000.mp4', '/tmp/j/char.png', '/tmp/j/out.mp4', { execFile: fakeExecFile, prompt: null });
+
+  const hf = calls.find((c) => c.command === 'higgsfield');
+  assert.match(hf.args[hf.args.indexOf('--prompt') + 1], /Replace the person in the video/);
+});

@@ -52,7 +52,7 @@ export async function generateFromSegment(
   segmentPath,
   characterImagePath,
   outputPath,
-  { execFile = defaultExecFile, productImagePath } = {},
+  { execFile = defaultExecFile, productImagePath, prompt } = {},
 ) {
   const mutedSegmentPath = path.join(
     path.dirname(segmentPath),
@@ -64,7 +64,8 @@ export async function generateFromSegment(
   if (productImagePath) {
     imageArgs.push('--image-references', productImagePath);
   }
-  const prompt = productImagePath ? FACE_AND_PRODUCT_SWAP_PROMPT : FACE_SWAP_PROMPT;
+  // A preview may carry its own wording; otherwise use the tested defaults.
+  const finalPrompt = prompt ?? (productImagePath ? FACE_AND_PRODUCT_SWAP_PROMPT : FACE_SWAP_PROMPT);
 
   const startedAt = new Date();
   let job;
@@ -74,7 +75,7 @@ export async function generateFromSegment(
       [
         'generate', 'create', 'ad_multiplier',
         '--mode', 'video_edit',
-        '--prompt', prompt,
+        '--prompt', finalPrompt,
         '--video-references', mutedSegmentPath,
         ...imageArgs,
         '--wait', '--json',
