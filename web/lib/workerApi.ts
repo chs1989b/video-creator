@@ -186,13 +186,22 @@ export function usedPreviews(job: Job): number {
   return job.attempts.filter((a) => a.status !== 'failed').length;
 }
 
+export type PreviewInput = {
+  prompt?: string | null;
+  /** A different person photo for this attempt only (the job keeps the one it was created with). */
+  characterImage?: File | null;
+  productImage?: File | null;
+};
+
 export async function runPreview(
   id: string,
-  { prompt = null }: { prompt?: string | null } = {},
+  { prompt = null, characterImage = null, productImage = null }: PreviewInput = {},
   { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
 ): Promise<void> {
   const form = new FormData();
   if (prompt && prompt.trim()) form.append('prompt', prompt.trim());
+  if (characterImage) form.append('characterImages', characterImage);
+  if (productImage) form.append('productImages', productImage);
   await request(`${baseUrl}/jobs/${id}/previews`, { method: 'POST', body: form }, fetchFn, '미리보기 실행 실패');
 }
 

@@ -16,6 +16,9 @@ export type PreviewNodeData = {
   onUnlock: (() => void) | null;
   attemptUrl: (attemptId: string) => string;
   previewCredits: number;
+  /** What to change in the next preview (English, optional). */
+  prompt: string;
+  onPromptChange: (value: string) => void;
 };
 
 function pastLabel(a: Attempt): string {
@@ -79,6 +82,19 @@ export function PreviewNode({ data }: NodeProps & { data: PreviewNodeData }) {
               거절
             </button>
           </div>
+        </div>
+      )}
+
+      {data.onRunPreview && job && job.attempts.length > 0 && (
+        <div className="mt-2 space-y-1">
+          <textarea
+            value={data.prompt}
+            onChange={(e) => data.onPromptChange(e.target.value)}
+            rows={2}
+            placeholder="다음 미리보기에서 바꿀 점 (영어, 선택) 예: Match the reference face closely."
+            className="nodrag w-full resize-none rounded-md border border-[var(--card-border)] bg-[var(--well)] px-2 py-1.5 text-[12px] text-[var(--ink)] placeholder:text-[var(--ink-faint)]"
+          />
+          <div className="text-[11px] text-[var(--ink-muted)]">인물·제품 사진을 바꾸면 다음 미리보기부터 적용됩니다</div>
         </div>
       )}
 

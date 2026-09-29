@@ -73,7 +73,7 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
     { id: 'video', type: 'videoInput', position: { x: 0, y: 40 }, data: { url: '', onUrlChange: noop, disabled: false } },
     { id: 'person', type: 'imageInput', position: { x: 20, y: 300 }, data: { title: '바꿀 인물', hint: '인물 사진', file: null, onFileChange: noop, disabled: false } },
     { id: 'product', type: 'imageInput', position: { x: 20, y: 560 }, data: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: null, onFileChange: noop, disabled: false } },
-    { id: 'preview', type: 'preview', position: { x: 340, y: 260 }, data: { job: null, onRunPreview: null, onVerdict: null, onUnlock: null, attemptUrl: () => '', previewCredits: PREVIEW_CREDITS } },
+    { id: 'preview', type: 'preview', position: { x: 340, y: 260 }, data: { job: null, onRunPreview: null, onVerdict: null, onUnlock: null, attemptUrl: () => '', previewCredits: PREVIEW_CREDITS, prompt: '', onPromptChange: noop } },
     { id: 'generate', type: 'stage', position: { x: 630, y: 300 }, data: stage('generate') },
     { id: 'merge', type: 'stage', position: { x: 920, y: 300 }, data: stage('merge') },
     { id: 'restyle-prompt', type: 'textInput', position: { x: 920, y: 40 }, data: { title: '의상·배경 프롬프트', placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오', hint: '비우면 의상·배경은 그대로', value: '', onChange: noop, disabled: false } },
@@ -146,10 +146,15 @@ export function Canvas() {
   const [restylePrompt, setRestylePrompt] = useState('');
   const [editPrompt, setEditPrompt] = useState('');
   const [script, setScript] = useState('');
+  const [previewPrompt, setPreviewPrompt] = useState('');
   const [job, setJob] = useState<Job | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Photos the job was created with: a different pick is sent with every later preview.
+  const createdFilesRef = useRef<{ person: File | null; product: File | null }>({ person: null, product: null });
+  // Blocks a second click while a preview request is on its way (each preview costs credits).
+  const previewPendingRef = useRef(false);
 
   // Theme: applied on the root element so every token flips at once.
   useEffect(() => {
@@ -209,6 +214,8 @@ export function Canvas() {
   const isRunning = job?.status === 'running';
   const locked = isRunning || isSubmitting || (job !== null && job.status !== 'done' && job.status !== 'failed' && job.status !== 'idle');
   const inputsLocked = job !== null || isSubmitting;
+  // Between previews the photos can change: the next preview uses the new pick.
+  const photosLocked = inputsLocked && !(job && previewAllowed(job));
 
   const submit = useCallback(
     async (autorun: boolean) => {
@@ -244,20 +251,30 @@ export function Canvas() {
   );
 
   const handleRunPreview = useCallback(async () => {
+    if (previewPendingRef.current) return;
+    previewPendingRef.current = true;
     setErrorMessage(null);
-    let target = job;
-    if (!target) {
-      target = await submit(false);
-      if (!target) return;
-    }
     try {
-      await runPreview(target.id);
+      let target = job;
+      if (!target) {
+        target = await submit(false);
+        if (!target) return;
+        createdFilesRef.current = { person: personFile, product: productFile };
+      }
+      const created = createdFilesRef.current;
+      await runPreview(target.id, {
+        prompt: previewPrompt,
+        characterImage: personFile && personFile !== created.person ? personFile : null,
+        productImage: productFile && productFile !== created.product ? productFile : null,
+      });
       setJob({ ...target, status: 'running', currentStage: 'preview' });
       startPolling(target.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : '미리보기를 시작하지 못했습니다.');
+    } finally {
+      previewPendingRef.current = false;
     }
-  }, [job, submit, startPolling]);
+  }, [job, submit, startPolling, previewPrompt, personFile, productFile]);
 
   const handleVerdict = useCallback(
     async (attemptId: string, verdict: Verdict, reasons: string[]) => {
@@ -356,8 +373,8 @@ export function Canvas() {
     });
     return {
       video: { url, onUrlChange: setUrl, disabled: inputsLocked },
-      person: { title: '바꿀 인물', hint: '인물 사진', file: personFile, onFileChange: setPersonFile, disabled: inputsLocked },
-      product: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: productFile, onFileChange: setProductFile, disabled: inputsLocked },
+      person: { title: '바꿀 인물', hint: '인물 사진', file: personFile, onFileChange: setPersonFile, disabled: photosLocked },
+      product: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: productFile, onFileChange: setProductFile, disabled: photosLocked },
       'restyle-prompt': {
         title: '의상·배경 프롬프트',
         placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오',
@@ -397,9 +414,11 @@ export function Canvas() {
         previewCredits: job?.segments[0]
           ? Math.round((job.segments[0].endSeconds - job.segments[0].startSeconds) * 7)
           : PREVIEW_CREDITS,
+        prompt: previewPrompt,
+        onPromptChange: setPreviewPrompt,
       },
     };
-  }, [url, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock]);
+  }, [url, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked]);
 
   const renderNodes = useMemo(
     () => nodes.map((node) => ({ ...node, data: dataById[node.id] ?? node.data })),

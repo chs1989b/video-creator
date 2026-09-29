@@ -166,3 +166,16 @@ test('attemptOutputUrl and usedPreviews', () => {
   const job = { attempts: [{ status: 'done' }, { status: 'failed' }, { status: 'running' }] } as unknown as Job;
   expect(usedPreviews(job)).toBe(2);
 });
+
+test('runPreview can send a new person or product photo for this attempt only', async () => {
+  const { calls, fetchFn } = recordingFetch(202, { ok: true });
+  await runPreview(
+    'job-1',
+    { prompt: 'Warmer smile.', characterImage: fakeFile('new-face.png'), productImage: fakeFile('new-pen.png') },
+    { baseUrl: 'http://w', fetchFn },
+  );
+  const body = calls[0].init.body as FormData;
+  expect((body.get('characterImages') as File).name).toBe('new-face.png');
+  expect((body.get('productImages') as File).name).toBe('new-pen.png');
+  expect(body.get('prompt')).toBe('Warmer smile.');
+});
