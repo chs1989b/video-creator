@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createDb, createJob, getJob } from '../src/pipeline/db.js';
-import { runJob, runStage, retrySegment, nextStage } from '../src/pipeline/jobRunner.js';
+import { createDb, createJob, getJob, updateJob } from '../src/pipeline/db.js';
+import { runJob, runStage, retrySegment, nextStage, ensureSegments, resolveDeps } from '../src/pipeline/jobRunner.js';
 
 async function setup(extra = {}) {
   const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'jobrunner-test-'));
@@ -231,4 +231,57 @@ test('runJob and runStage refuse to start while the job is already running', asy
   await assert.rejects(runStage(db, 'job-1', tmpDir, 'generate', deps), /already running/);
   release();
   await running;
+});
+
+test('a preview job refuses to generate before a preview is approved, without touching its state', async () => {
+  const { db, tmpDir } = await setup({ previewRequired: true });
+
+  await assert.rejects(runStage(db, 'job-1', tmpDir, 'generate', happyDeps()), /approve a preview/);
+  await assert.rejects(runJob(db, 'job-1', tmpDir, happyDeps()), /approve a preview/);
+
+  const job = await getJob(db, 'job-1');
+  assert.equal(job.status, 'idle');
+  assert.equal(job.stages.generate.status, 'pending');
+});
+
+test('ensureSegments splits a preview job once, with a 5-second first segment', async () => {
+  const { db, tmpDir } = await setup({ previewRequired: true });
+  const splitCalls = [];
+  const d = resolveDeps(happyDeps({
+    splitIntoSegments: async (_src, _dir, size, opts) => { splitCalls.push({ size, opts }); return twoSegments(); },
+  }));
+
+  await ensureSegments(db, 'job-1', tmpDir, d);
+  await ensureSegments(db, 'job-1', tmpDir, d);
+
+  assert.deepEqual(splitCalls, [{ size: 10, opts: { firstSegmentSeconds: 5 } }]);
+  const job = await getJob(db, 'job-1');
+  assert.equal(job.segments.length, 2);
+  assert.equal(job.segments[0].status, 'pending');
+});
+
+test('generate passes the approved prompt through and records each segment\'s credits', async () => {
+  const { db, tmpDir } = await setup();
+  await updateJob(db, 'job-1', { generatePrompt: 'Swap the face carefully.' });
+  const prompts = [];
+  const deps = happyDeps({
+    generateFromSegment: async (_s, _c, outputPath, opts) => { prompts.push(opts.prompt); return { outputPath }; },
+  });
+
+  await runStage(db, 'job-1', tmpDir, 'generate', deps);
+
+  assert.deepEqual(prompts, ['Swap the face carefully.', 'Swap the face carefully.']);
+  const job = await getJob(db, 'job-1');
+  assert.deepEqual(job.segments.map((s) => s.credits), [70, 35]);
+});
+
+test('finishing stages record their estimated credits', async () => {
+  const { db, tmpDir } = await setup({ restylePrompt: 'Beige shirt.', script: 'Hi.' });
+
+  await runJob(db, 'job-1', tmpDir, happyDeps());
+
+  const job = await getJob(db, 'job-1');
+  assert.equal(job.stages.restyle.credits, 30); // 15-second video -> 2 x 15
+  assert.equal(job.stages.voiceover.credits, 0.45);
+  assert.equal(job.stages.edit.credits ?? null, null); // skipped: nothing spent
 });

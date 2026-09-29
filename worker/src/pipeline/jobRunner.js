@@ -10,13 +10,14 @@ import {
 } from './voiceover.js';
 import { getJob, updateJob } from './db.js';
 import { STAGE_ORDER } from './stages.js';
+import { PREVIEW_SECONDS, estimateCredits, segmentSeconds, PRICED_STAGES, stageCredits } from './costs.js';
 
 // Every stage records its own status and output on the job, so a run can stop
 // anywhere and pick up from the first stage that is not `done` — nothing that
 // already cost credits is generated twice.
 export { STAGE_ORDER, initialStages } from './stages.js';
 
-function resolveDeps(deps) {
+export function resolveDeps(deps = {}) {
   return {
     downloadVideo: deps.downloadVideo ?? defaultDownloadVideo,
     splitIntoSegments: deps.splitIntoSegments ?? defaultSplitIntoSegments,
@@ -40,12 +41,13 @@ async function setStage(db, jobId, stage, patch) {
   return updateJob(db, jobId, { stages });
 }
 
-async function setSegmentStatus(db, jobId, index, status, resultPath, error) {
+async function setSegmentStatus(db, jobId, index, status, resultPath, error, credits = null) {
   const job = await requireJob(db, jobId);
   const segment = job.segments.find((s) => s.index === index);
   segment.status = status;
   segment.resultPath = resultPath;
   segment.error = error ?? null;
+  segment.credits = credits;
   await updateJob(db, jobId, { segments: job.segments });
 }
 
@@ -67,20 +69,27 @@ function previousStageDone(job, stage) {
   return before.every((s) => ['done', 'skipped'].includes(job.stages[s]?.status));
 }
 
+export const APPROVAL_REQUIRED = 'approve a preview before generating the remaining segments';
+
+const generateCredits = (segment) => estimateCredits('ad_multiplier', { seconds: segmentSeconds(segment) });
+
+/** Download and split only once; a resumed job keeps its segments. Shared by generate and preview. */
+export async function ensureSegments(db, jobId, workDir, d) {
+  const job = await requireJob(db, jobId);
+  if (job.segments.length > 0) return job;
+  const { filePath: sourcePath } = await d.downloadVideo(job.youtubeUrl, workDir);
+  const options = job.previewRequired ? { firstSegmentSeconds: PREVIEW_SECONDS } : {};
+  const segments = await d.splitIntoSegments(sourcePath, workDir, 10, options);
+  await updateJob(db, jobId, {
+    segments: segments.map((s) => ({ ...s, status: 'pending', resultPath: null, error: null, credits: null })),
+  });
+  return requireJob(db, jobId);
+}
+
 // --- stage bodies -----------------------------------------------------------
 
 async function stageGenerate(db, jobId, workDir, d) {
-  let job = await requireJob(db, jobId);
-
-  // Download + split only once; a resumed job keeps its segments.
-  if (job.segments.length === 0) {
-    const { filePath: sourcePath } = await d.downloadVideo(job.youtubeUrl, workDir);
-    const segments = await d.splitIntoSegments(sourcePath, workDir, 10);
-    await updateJob(db, jobId, {
-      segments: segments.map((s) => ({ ...s, status: 'pending', resultPath: null, error: null })),
-    });
-    job = await requireJob(db, jobId);
-  }
+  const job = await ensureSegments(db, jobId, workDir, d);
 
   let failed = 0;
   for (const segment of job.segments) {
@@ -89,11 +98,13 @@ async function stageGenerate(db, jobId, workDir, d) {
     try {
       await d.generateFromSegment(segment.path, job.characterImagePaths[0], outputPath, {
         productImagePath: job.productImagePaths?.[0],
+        prompt: job.generatePrompt,
       });
-      await setSegmentStatus(db, jobId, segment.index, 'done', outputPath);
+      await setSegmentStatus(db, jobId, segment.index, 'done', outputPath, null, generateCredits(segment));
     } catch (error) {
       failed += 1;
-      await setSegmentStatus(db, jobId, segment.index, 'failed', null, error.message);
+      // Failed generations are refunded by Higgsfield, so they cost nothing.
+      await setSegmentStatus(db, jobId, segment.index, 'failed', null, error.message, 0);
       // Keep going: each segment is billed on its own, and only the failed
       // ones need to run again next time.
     }
@@ -151,12 +162,17 @@ export async function runStage(db, jobId, workDir, stage, deps = {}) {
   if (job.status === 'running') throw new Error('Job is already running');
   if (job.stages[stage].status === 'skipped') throw new Error(`Stage ${stage} has no input and is skipped`);
   if (!previousStageDone(job, stage)) throw new Error(`Stage ${stage} needs the earlier stages to finish first`);
+  if (stage === 'generate' && job.previewRequired && !job.approvedAttemptId) {
+    throw new Error(APPROVAL_REQUIRED);
+  }
 
   await updateJob(db, jobId, { status: 'running', currentStage: stage, error: null });
   await setStage(db, jobId, stage, { status: 'running', error: null });
   try {
     const outputPath = await bodies[stage](db, jobId, workDir, d);
-    await setStage(db, jobId, stage, { status: 'done', outputPath, error: null });
+    const patch = { status: 'done', outputPath, error: null };
+    if (PRICED_STAGES.includes(stage)) patch.credits = stageCredits(await requireJob(db, jobId), stage);
+    await setStage(db, jobId, stage, patch);
     const updated = await requireJob(db, jobId);
     const remaining = nextStage(updated);
     await updateJob(db, jobId, {
@@ -198,10 +214,11 @@ export async function retrySegment(db, jobId, segmentIndex, workDir, deps = {}) 
   try {
     await d.generateFromSegment(segment.path, job.characterImagePaths[0], outputPath, {
       productImagePath: job.productImagePaths?.[0],
+      prompt: job.generatePrompt,
     });
-    await setSegmentStatus(db, jobId, segmentIndex, 'done', outputPath);
+    await setSegmentStatus(db, jobId, segmentIndex, 'done', outputPath, null, generateCredits(segment));
   } catch (error) {
-    await setSegmentStatus(db, jobId, segmentIndex, 'failed', null, error.message);
+    await setSegmentStatus(db, jobId, segmentIndex, 'failed', null, error.message, 0);
     await updateJob(db, jobId, { status: 'failed', currentStage: null, error: error.message });
     throw error;
   }
