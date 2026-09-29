@@ -35,12 +35,36 @@
    - 테스트: 워커 43개(신규 5), 웹 9개, tsc 통과.
    - 비용 메모: TTS는 비용 조회 0.3이었지만 실차감 0.45("Voiceover" 항목). FLUX 편집은 조회 15, 실차감 9.71. 조회값은 상한으로 보면 됨.
 
-6. 9/22 대비 네트워크는 여전히 느림(업로드 ~77KB/s). 8.5KB 제품 이미지 업로드는 4초로 문제없었지만 1MB 세그먼트는 여전히 위험 → 워커 경로 E2E는 오늘도 시도 안 함.
+6. **④ 의상·배경 교체 단계 추가, 기존 보정은 ⑤로 (사용자 요청)**: 파이프라인이 병합 → **④ 의상·배경**(`restylePrompt`, 상태 `restyling`, `final-restyled.mp4`) → **⑤ 보정**(`editPrompt`, `editing`, `final-edited.mp4`) → ③ 나레이션으로. 둘 다 `editVideo`(FLUX) 재사용, 프롬프트만 다름. `POST /jobs`에 `restylePrompt` 필드, 웹에 "의상·배경 프롬프트" 노트 카드 + "의상·배경 교체" 단계 카드. 테스트 워커 43·웹 9·tsc 통과.
+   - **실제 테스트**: 2단계 결과(`661cf181`)에 "베이지 린넨 셔츠 + 화이트 스튜디오 배경, 얼굴·머리·아이라이너·동작·구도 유지" → 약 1.5분 `completed`, 9.71크레딧. 결과 `worker/data/test-flux3edit-restyle-beige-studio-20260923.mp4`, 프레임 `result5-2s.jpg`/`result5-8s.jpg`: 옷·배경이 지시대로 바뀌고 인물 동일성·제품·동작 유지됨. FLUX 편집이 조명 보정뿐 아니라 의상·배경 교체도 감당함을 확인.
+   - 대안으로 검토했던 방식: 의상·배경 지시를 ①② 생성 프롬프트에 합치기(비용 0, 단 독립 단계가 아님), `ad_multiplier video_edit` 프롬프트만(70). 사용자가 "병합 뒤 FLUX 별도 패스"를 선택.
+   - UI 스크린샷 `worker/data/canvas-restyle-stage-20260923.png`.
+
+7. **워커 E2E 시도 (UI에서 시작, 2회 시도 후 중단 — 사용자 지시)**: 잡 `a762ac9d`, 업로드 속도 ~79KB/s 환경.
+   - 1차(UI "영상 만들기"): 다운로드·분할 정상 → **seg1(7초) 워커 경로로 최초 성공**(49.28크레딧, 길이 비례 과금 확인) / seg0은 영상 업로드 후 이미지 업로드 요청에서 `request failed (no response received)`.
+   - 2차(`POST /jobs/:id/segments/0/retry`): seg0 성공(70) → 병합(`final.mp4`, 16.25초) → **④ 의상·배경 FLUX 성공**(15크레딧 — 16초라 10초 테스트의 9.71보다 비례 증가, 출력 `final-restyled.mp4` 15.04초로 약 1.2초 짧아짐) → **⑤ 보정 단계에서 실패**: `final-restyled.mp4`(4.1MB) 업로드는 성공했으나(업로드 목록에 있음) 그 직후 `generate create` 요청이 `no response received`. FLUX 잡 미생성, 과금 없음.
+   - **원인 판정**: 이 네트워크에서 Higgsfield CLI의 HTTP 요청이 간헐적으로 응답을 못 받음. 실패 지점이 매번 다름(이미지 업로드 / create 호출) → 파일 크기보다 "요청 하나가 멈추면 즉시 실패, 재시도 없음"이 문제. 안정 네트워크로 옮기거나 워커에 요청 단위 재시도를 넣어야 함.
+   - **품질 관찰**: ④를 16초 병합 영상에 적용한 결과는 10초 테스트보다 약함 — 앞 구간은 셔츠·배경이 일부만 바뀌고, 뒤 구간(seg1)은 욕실이 거의 그대로. 또 seg0/seg1이 독립 생성되어 **구간 사이 인물 동일성이 완벽하지 않음**(프레임 `worker/data/e2e-merged-{3,13}s.jpg`, `e2e-restyled-{3,13}s.jpg`). 구간별 생성 구조의 본질적 한계 — 다음 회차 논의 주제.
+   - **코드 버그 2건 발견**: (a) `retrySegment` 경로에서 병합 이후 단계(④⑤③)가 실패하면 `maybeFinishJob`이 throw만 하고 잡 상태를 `failed`로 바꾸지 않아 **`editing`에 영원히 멈춤**(현재 `a762ac9d`가 그 상태); (b) 재시도로 이어 진행할 때 이전 `job.error`("1 segment(s) failed…")가 지워지지 않음. 그리고 (c) 마무리 단계만 다시 돌릴 엔드포인트가 없음 — seg0·1·병합·④까지 성공한 이 잡을 ⑤부터 이어갈 방법이 없음(`POST /jobs/:id/finish` 같은 것이 필요). UI도 `failed`를 보면 폴링을 멈춰 재시도 진행을 반영하지 못함.
+   - 이 잡의 중간 산출물(`worker/data/jobs/a762ac9d…/final.mp4`, `final-restyled.mp4`)은 남아 있음.
+
+8. **단계별 저장·이어하기 구조 + 단계별 실행 + 다크/라이트 (사용자 요청, 9/23 심야)**:
+   - **잡 모델 변경**: `status`가 `idle | running | done | failed`로 단순화되고, `stages.{generate,merge,restyle,edit,voiceover}`에 단계별 `{status: pending|running|done|failed|skipped, outputPath, error}`가 기록됨. 입력이 없는 선택 단계는 생성 시 `skipped`. `currentStage`로 지금 도는 단계 표시.
+   - **워커 `jobRunner.js` 재작성**: `runStage(db,id,dir,stage)`(한 단계), `runJob`(남은 단계를 순서대로 — done/skipped는 건너뜀 → **재실행해도 크레딧 재소모 없음**), `retrySegment`(구간 하나만 재생성, 자동 진행 안 함). 각 단계 입력은 `latestVideoPath(job)`(가장 최근 done 단계의 출력). generate 단계는 세그먼트가 없을 때만 다운로드·분할. 실패 시 해당 단계 `failed` + 잡 `failed`로 확정(진행 상태에 멈추는 버그 해결), 성공 시 `error` 초기화. 이미 `running`이면 거부. `stages.js`에 `STAGE_ORDER`/`initialStages` 분리(db.js가 import).
+   - **엔드포인트**: `POST /jobs`(폼 필드 `autorun=false`면 생성만), `POST /jobs/:id/run`(이어하기, 202), `POST /jobs/:id/stages/:stage/run`(한 단계, 앞 단계 미완이면 409, 202), `GET /jobs/:id/stages/:stage/output`(중간 산출물 영상), 기존 `segments/:i/retry` 유지.
+   - **레거시 잡 호환**: `db.js`의 `normalizeJob`이 `stages` 없는 옛 잡에 세그먼트 상태로부터 stage 기록을 만들어 줌. 어젯밤 멈춰 있던 `a762ac9d`는 실제 파일 존재로 `generate/merge/restyle=done, edit=failed`로 db.json을 직접 보정해 둠 → UI에서 "실패한 단계부터 이어서"를 누르면 ⑤부터 재개 가능(FLUX ~15 + TTS 0.5 크레딧).
+   - **UI**: 각 단계 카드에 "이 단계만 실행"(앞 단계가 끝난 단계에만 표시, 잡이 없으면 첫 단계 버튼이 잡을 `autorun=false`로 만들고 시작), 실패한 generate에는 "구간 N 다시" 버튼, 완료된 단계 카드에 산출물 미리보기. 하단 버튼은 상태에 따라 "영상 만들기 / 남은 단계 모두 실행 / 실패한 단계부터 이어서 / 완성됨". 잡 id를 `localStorage`에 저장해 새로고침 후에도 마지막 잡을 다시 열고 이어갈 수 있음("새 작업" 버튼으로 초기화). 우상단 **다크/라이트 토글**(`data-theme`, localStorage 저장; `--well` 토큰으로 검정 상자도 테마 적용). 폴링은 `running`일 때만.
+   - 테스트: 워커 46개(runner 10개 재작성: 순서·재개·구간 재시도·동시 실행 거부·마무리 단계 실패 후 재개), 웹 10개, tsc 통과. 스크린샷 `worker/data/canvas-staged-{dark,light}-20260923.png`.
+   - **아직 안 한 것**: 요청 단위 자동 재시도(네트워크 흔들림 대응)는 넣지 않음 — 지금은 실패하면 사람이 "이어서"를 누르는 구조. 미커밋.
+
+9. **✅ 첫 종단 완주 (9/24 새벽, 사용자가 UI에서 직접 실행)**: 잡 `926e1aee-9ccc-4908-8b01-e2b41d60eb04` — 생성 2구간(70 + 49.28) → 병합(16.25초) → ④ FLUX(15) → ⑤ FLUX(15) → ③ TTS(0.45) → `final-voiced.mp4`(15.04초, 영상+음성). 총 149.73크레딧, 잔여 268.31. 단계별 파일 12개가 `worker/data/jobs/926e1aee…/`에 모두 있음. 같은 네트워크였지만 이번엔 요청이 끊기지 않았음(운). 3회차 교육 자료 Part 2(`week3/session_3_2.html`)에 이 잡의 폴더·db.json 기록을 예시로 사용.
+
+10. 9/22 대비 네트워크는 여전히 느림(업로드 ~77KB/s). 8.5KB 제품 이미지 업로드는 4초로 문제없었지만 1MB 세그먼트는 여전히 위험 → 워커 경로 E2E는 오늘도 시도 안 함.
 
 ## ⚠️ 지금 실제 코드 상태
 
-- 워커/웹 모두 1~4단계 코드가 들어가 있고 워커는 재시작해서 새 코드로 4000 포트에 떠 있음. 웹 dev 서버(3000)는 핫리로드로 반영됨. 3단계까지 커밋됨(`12bb26b`, `b7b716e`, `c49dd8a`), 4단계+리디자인은 미커밋.
-- **워커 코드 경로(파일 업로드 포함)로 실제 성공한 적은 1~4단계 모두 아직 없음.** 성공은 전부 CLI 우회(사전 업로드된 ID)와 로컬 ffmpeg. 세그먼트 1(10–17초), 병합, 워커의 editing/voiceover 단계는 한 번도 실제로 실행 안 됨.
+- 워커/웹 모두 1~5단계 코드가 들어가 있고 워커는 재시작해서 새 코드로 4000 포트에 떠 있음. 웹 dev 서버(3000)는 핫리로드로 반영됨. 4단계(구 보정)+리디자인까지 커밋됨(`6d6bcb4`, `e2296cd`, `3c7801c`), **④ 의상·배경 추가분은 미커밋**. 원격 저장소 없음 — 사용자가 푸시·main·"실제 URL" 테스트를 요청했으나 저장소/브랜치/배포 방식 확인 중 중단됨(CLAUDE.md "코드·저장소 상태" 참고).
+- **워커 코드 경로(파일 업로드 포함)로 실제 성공한 적은 1~5단계 모두 아직 없음.** 성공은 전부 CLI 우회(사전 업로드된 ID)와 로컬 ffmpeg. 세그먼트 1(10–17초), 병합, 워커의 restyling/editing/voiceover 단계는 한 번도 실제로 실행 안 됨.
 
 ## 다음에 할 일 (우선순위 순)
 

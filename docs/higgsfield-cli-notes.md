@@ -251,6 +251,8 @@ ffmpeg -y -i final.mp4 -i voiceover.mp3 -map 0:v -map 1:a -c:v copy -c:a aac -af
 higgsfield generate create flux_3_video_edit --prompt "<보정 지시>" --video-references <video-path-or-id> --wait --json
 ```
 
-**비용 실측 vs 조회값**: TTS(`text2speech_v2`) 조회 0.3 → 실차감 0.45("Voiceover" 항목), FLUX 편집 조회 15 → 실차감 9.71. `generate cost`는 대략치로만 볼 것; 실제 금액은 `account transactions`.
+- **`flux_3_video_edit`로 의상·배경 교체(4단계, 같은 날 추가)**: 같은 영상에 "Change her outfit to a beige linen shirt and replace the bathroom with a bright, clean white photo studio backdrop. Keep her face, hair, the black eyeliner pen in her hand, her pose and motion, and the camera framing exactly the same." → 약 1.5분 `completed`, 9.71크레딧. 옷과 배경이 지시대로 바뀌고 얼굴·머리·제품·동작 유지. 프롬프트에 **유지할 것을 명시**하는 문장이 결과 안정성에 중요해 보임(조명 보정 때도 같은 패턴). 결과 `worker/data/test-flux3edit-restyle-beige-studio-20260923.mp4`.
+
+**비용 실측 vs 조회값**: TTS(`text2speech_v2`) 조회 0.3 → 실차감 0.45("Voiceover" 항목), FLUX 편집 조회 15 → 실차감 9.71(2회 모두). `generate cost`는 대략치로만 볼 것; 실제 금액은 `account transactions`.
 
 **교훈(9/22)**: 업로드가 느린 환경에서는 워커의 파일 경로 전달 방식이 취약함. 대안으로 (a) 워커가 `upload create`로 먼저 올리고 ID로 `generate create`를 호출하도록 분리하면 실패 지점을 좁히고 재시도도 단계별로 할 수 있음, (b) 세그먼트 파일 크기 축소. 둘 다 아직 미구현 — 안정 네트워크에서 현 코드로 먼저 성공을 확인한 뒤 판단.
