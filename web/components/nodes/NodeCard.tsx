@@ -21,6 +21,8 @@ type Props = {
   /** Right handle: this card produces something. */
   output?: boolean;
   outputColor?: string;
+  /** Present on optional cards: removes the card (and its stage) from the pipeline. */
+  onRemove?: (() => void) | null;
   children: ReactNode;
 };
 
@@ -35,6 +37,7 @@ export function NodeCard({
   input = false,
   output = false,
   outputColor,
+  onRemove,
   children,
 }: Props) {
   const accent = toneColor[tone];
@@ -52,13 +55,26 @@ export function NodeCard({
       )}
       <div className="flex items-center justify-between px-3 pt-2.5 pb-1.5">
         <span className="text-[12.5px] font-medium text-[var(--ink)]">{title}</span>
-        {tone !== 'idle' && (
-          <span
-            aria-hidden
-            className="h-2 w-2 rounded-full"
-            style={{ background: accent }}
-          />
-        )}
+        <span className="flex items-center gap-1.5">
+          {tone !== 'idle' && (
+            <span
+              aria-hidden
+              className="h-2 w-2 rounded-full"
+              style={{ background: accent }}
+            />
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label={`${title} 빼기`}
+              title="이 노드 빼기"
+              className="nodrag -mr-1 rounded px-1 text-[13px] leading-none text-[var(--ink-muted)] hover:text-[var(--danger)]"
+            >
+              ×
+            </button>
+          )}
+        </span>
       </div>
       <div className="px-3 pb-3">{children}</div>
       {output && (

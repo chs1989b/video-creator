@@ -10,12 +10,13 @@ export type TextInputNodeData = {
   value: string;
   onChange: (value: string) => void;
   disabled: boolean;
+  onRemove?: (() => void) | null;
 };
 
 /** A note card: used for the narration script and the final edit prompt. */
 export function TextInputNode({ data }: NodeProps & { data: TextInputNodeData }) {
   return (
-    <NodeCard title={data.title} width={200} output outputColor="var(--text-edge)">
+    <NodeCard title={data.title} width={200} output outputColor="var(--text-edge)" onRemove={data.onRemove}>
       <textarea
         rows={5}
         placeholder={data.placeholder}

@@ -12,7 +12,7 @@ const job = (patch: Partial<Job> = {}): Job => ({
   id: 'job-1', youtubeUrl: 'u', characterImagePaths: ['/c.png'], productImagePaths: [], script: null,
   restylePrompt: null, editPrompt: null, status: 'idle', currentStage: null,
   stages: {} as Job['stages'], segments: [], resultPath: null, error: null, createdAt: '',
-  previewRequired: true, previewLimit: 5, attempts: [], approvedAttemptId: null,
+  previewRequired: true, mock: false, previewLimit: 5, attempts: [], approvedAttemptId: null,
   ...patch,
 });
 

@@ -60,6 +60,8 @@ export type Job = {
   error: string | null;
   createdAt: string;
   previewRequired: boolean;
+  /** Made by a worker running GENERATOR=mock: no credits were spent, the output is the source footage. */
+  mock: boolean;
   previewLimit: number;
   attempts: Attempt[];
   approvedAttemptId: string | null;
@@ -251,5 +253,15 @@ export async function updateJobInputs(
     fetchFn,
     '입력 저장 실패',
   );
+  return res.json();
+}
+
+export type WorkerConfig = { generator: 'higgsfield' | 'mock' };
+
+/** Which generator the worker runs: 'mock' spends no credits (test mode). */
+export async function getConfig(
+  { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
+): Promise<WorkerConfig> {
+  const res = await request(`${baseUrl}/config`, {}, fetchFn, '워커 설정 조회 실패');
   return res.json();
 }

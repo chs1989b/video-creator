@@ -15,13 +15,14 @@ export type StageNodeData = {
   onRun: (() => void) | null;
   /** Present for the generate stage when segments failed. */
   onRetrySegment: ((index: number) => void) | null;
+  onRemove?: (() => void) | null;
 };
 
 const titles: Record<Stage, string> = {
   generate: '나머지 구간 생성',
   merge: '구간 이어붙이기',
   restyle: '의상·배경 교체',
-  edit: '프롬프트 보정',
+  edit: '최종 보정',
   voiceover: '나레이션',
 };
 
@@ -90,7 +91,7 @@ export function StageNode({ data }: NodeProps & { data: StageNodeData }) {
   const showRetries = state?.status === 'failed' && failedSegments.length > 0 && data.onRetrySegment;
 
   return (
-    <NodeCard title={titles[stage]} width={200} tone={tone} input output>
+    <NodeCard title={titles[stage]} width={200} tone={tone} input output onRemove={data.onRemove}>
       <div
         className="text-[13px] leading-snug"
         style={{ color: tone === 'idle' ? 'var(--ink-muted)' : 'var(--ink)' }}

@@ -10,6 +10,7 @@ export type ImageInputNodeData = {
   file: File | null;
   onFileChange: (file: File | null) => void;
   disabled: boolean;
+  onRemove?: (() => void) | null;
 };
 
 /** One card for both the person and the product: an image well with a picker under it. */
@@ -20,7 +21,7 @@ export function ImageInputNode({ data }: NodeProps & { data: ImageInputNodeData 
   }, [previewUrl]);
 
   return (
-    <NodeCard title={data.title} width={180} output outputColor="var(--media)">
+    <NodeCard title={data.title} width={180} output outputColor="var(--media)" onRemove={data.onRemove}>
       <label className="block cursor-pointer">
         <div className="mb-2 aspect-square w-full overflow-hidden rounded-md bg-[var(--well)]">
           {previewUrl ? (

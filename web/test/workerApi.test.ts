@@ -1,7 +1,7 @@
 import { test, expect } from 'vitest';
 import {
   createJob, getJob, runJob, runStage, resultUrl, stageOutputUrl,
-  runPreview, sendVerdict, unlockPreview, attemptOutputUrl, usedPreviews, updateJobInputs, type Job,
+  runPreview, sendVerdict, unlockPreview, attemptOutputUrl, usedPreviews, updateJobInputs, getConfig, type Job,
 } from '../lib/workerApi';
 
 function fakeFile(name: string): File {
@@ -187,4 +187,11 @@ test('updateJobInputs sends a PATCH with the given fields', async () => {
   expect(calls[0].init.method).toBe('PATCH');
   expect(JSON.parse(String(calls[0].init.body))).toEqual({ script: 'Hi.', restylePrompt: '' });
   expect(job.script).toBe('Hi.');
+});
+
+test('getConfig reads which generator the worker runs', async () => {
+  const { calls, fetchFn } = recordingFetch(200, { generator: 'mock' });
+  const config = await getConfig({ baseUrl: 'http://w', fetchFn });
+  expect(calls[0].url).toBe('http://w/config');
+  expect(config.generator).toBe('mock');
 });

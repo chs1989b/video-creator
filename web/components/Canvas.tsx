@@ -12,6 +12,8 @@ import {
   type Node,
   type Edge,
   type Connection,
+  type NodeChange,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { VideoInputNode, type VideoInputNodeData } from './nodes/VideoInputNode';
@@ -20,7 +22,19 @@ import { TextInputNode, type TextInputNodeData } from './nodes/TextInputNode';
 import { StageNode, canRunStage, type StageNodeData } from './nodes/StageNode';
 import { ResultNode, type ResultNodeData } from './nodes/ResultNode';
 import { PreviewNode, type PreviewNodeData } from './nodes/PreviewNode';
+import { NodePalette, PALETTE_MIME } from './NodePalette';
 import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
+import {
+  OPTIONAL_NODES,
+  hiddenNodeIds,
+  NODE_IDS,
+  pipelineEdges,
+  canToggle,
+  presentFromJob,
+  optionalNodeOf,
+  dropPlacement,
+  type OptionalNode,
+} from '../lib/pipelineGraph';
 import {
   createJob,
   getJob,
@@ -34,6 +48,7 @@ import {
   attemptOutputUrl,
   PREVIEW_CREDITS,
   updateJobInputs,
+  getConfig,
   STAGE_ORDER,
   type Job,
   type StageName,
@@ -80,7 +95,7 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
     { id: 'merge', type: 'stage', position: { x: 920, y: 300 }, data: stage('merge') },
     { id: 'restyle-prompt', type: 'textInput', position: { x: 920, y: 40 }, data: { title: '의상·배경 프롬프트', placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오', hint: '비우면 의상·배경은 그대로', value: '', onChange: noop, disabled: false } },
     { id: 'restyle', type: 'stage', position: { x: 1210, y: 300 }, data: stage('restyle') },
-    { id: 'edit-prompt', type: 'textInput', position: { x: 1210, y: 560 }, data: { title: '보정 프롬프트', placeholder: '예: 조명을 더 따뜻하게', hint: '비우면 보정 없이 넘어갑니다', value: '', onChange: noop, disabled: false } },
+    { id: 'edit-prompt', type: 'textInput', position: { x: 1210, y: 560 }, data: { title: '최종 보정 프롬프트', placeholder: '예: 조명을 더 따뜻하게', hint: '비우면 보정 없이 넘어갑니다', value: '', onChange: noop, disabled: false } },
     { id: 'edit', type: 'stage', position: { x: 1500, y: 300 }, data: stage('edit') },
     { id: 'script', type: 'textInput', position: { x: 1500, y: 40 }, data: { title: '나레이션 대본', placeholder: '영상에 얹을 말을 적어주세요', hint: '비우면 음성 없이 만듭니다', value: '', onChange: noop, disabled: false } },
     { id: 'voiceover', type: 'stage', position: { x: 1790, y: 300 }, data: stage('voiceover') },
@@ -88,35 +103,22 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
   ];
 }
 
-type EdgeSpec = { id: string; source: string; target: string; color: string; stage?: StageName };
-
-const edgeSpecs: EdgeSpec[] = [
-  { id: 'video-preview', source: 'video', target: 'preview', color: MEDIA },
-  { id: 'person-preview', source: 'person', target: 'preview', color: MEDIA },
-  { id: 'product-preview', source: 'product', target: 'preview', color: MEDIA },
-  { id: 'preview-generate', source: 'preview', target: 'generate', color: QUIET, stage: 'generate' },
-  { id: 'generate-merge', source: 'generate', target: 'merge', color: QUIET, stage: 'merge' },
-  { id: 'merge-restyle', source: 'merge', target: 'restyle', color: QUIET, stage: 'restyle' },
-  { id: 'restyle-prompt-restyle', source: 'restyle-prompt', target: 'restyle', color: TEXT, stage: 'restyle' },
-  { id: 'restyle-edit', source: 'restyle', target: 'edit', color: QUIET, stage: 'edit' },
-  { id: 'prompt-edit', source: 'edit-prompt', target: 'edit', color: TEXT, stage: 'edit' },
-  { id: 'edit-voiceover', source: 'edit', target: 'voiceover', color: QUIET, stage: 'voiceover' },
-  { id: 'script-voiceover', source: 'script', target: 'voiceover', color: TEXT, stage: 'voiceover' },
-  { id: 'voiceover-result', source: 'voiceover', target: 'result', color: QUIET },
-];
-
-function buildEdges(job: Job | null): Edge[] {
-  return edgeSpecs.map((e) => ({
+function buildEdges(job: Job | null, present: Set<OptionalNode>): Edge[] {
+  const color = { media: MEDIA, text: TEXT, flow: QUIET } as const;
+  return pipelineEdges(present).map((e) => ({
     id: e.id,
     source: e.source,
     target: e.target,
-    style: { stroke: e.color },
+    style: { stroke: color[e.kind] },
     className:
       job && ((e.stage && job.stages[e.stage]?.status === 'running') || (e.target === 'preview' && job.currentStage === 'preview'))
         ? 'is-running'
         : undefined,
   }));
 }
+
+const isOptional = (stage: StageName): stage is 'restyle' | 'edit' | 'voiceover' =>
+  stage === 'restyle' || stage === 'edit' || stage === 'voiceover';
 
 type Theme = 'dark' | 'light';
 
@@ -138,8 +140,13 @@ function writeStorage(key: string, value: string | null) {
 }
 
 export function Canvas() {
-  const [nodes, , onNodesChange] = useNodesState<Node<AnyNodeData>>(buildInitialNodes());
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(buildEdges(null));
+  const [nodes, setNodes, onBaseNodesChange] = useNodesState<Node<AnyNodeData>>(buildInitialNodes());
+  const [flow, setFlow] = useState<Pick<ReactFlowInstance, 'screenToFlowPosition'> | null>(null);
+  const paletteRef = useRef<HTMLElement>(null);
+  const [paletteDropActive, setPaletteDropActive] = useState(false);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>(buildEdges(null, new Set(OPTIONAL_NODES)));
+  // Optional cards currently on the canvas (the user adds and removes them).
+  const [present, setPresent] = useState<Set<OptionalNode>>(() => new Set(OPTIONAL_NODES));
 
   const [theme, setTheme] = useState<Theme>('dark');
   const [url, setUrl] = useState('');
@@ -149,6 +156,7 @@ export function Canvas() {
   const [editPrompt, setEditPrompt] = useState('');
   const [script, setScript] = useState('');
   const [previewPrompt, setPreviewPrompt] = useState('');
+  const [workerMock, setWorkerMock] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -193,6 +201,13 @@ export function Canvas() {
 
   useEffect(() => stopPolling, [stopPolling]);
 
+  // Test mode: a worker started with GENERATOR=mock spends no credits.
+  useEffect(() => {
+    getConfig()
+      .then((config) => setWorkerMock(config.generator === 'mock'))
+      .catch(() => setWorkerMock(false));
+  }, []);
+
   // Reopen the last job, so a saved pipeline can be resumed after a reload.
   useEffect(() => {
     const lastId = readStorage(LAST_JOB_KEY);
@@ -204,14 +219,15 @@ export function Canvas() {
         if (saved.restylePrompt) setRestylePrompt(saved.restylePrompt);
         if (saved.editPrompt) setEditPrompt(saved.editPrompt);
         if (saved.script) setScript(saved.script);
+        setPresent(presentFromJob(saved));
         if (saved.status === 'running') startPolling(saved.id);
       })
       .catch(() => writeStorage(LAST_JOB_KEY, null));
   }, [startPolling]);
 
   useEffect(() => {
-    setEdges(buildEdges(job));
-  }, [job, setEdges]);
+    setEdges(buildEdges(job, present));
+  }, [job, present, setEdges]);
 
   const isRunning = job?.status === 'running';
   const locked = isRunning || isSubmitting || (job !== null && job.status !== 'done' && job.status !== 'failed' && job.status !== 'idle');
@@ -385,7 +401,104 @@ export function Canvas() {
     [job, startPolling],
   );
 
+  const removeNode = useCallback(
+    (node: OptionalNode) => {
+      if (!canToggle(job, node)) return;
+      setPresent((cur) => new Set([...cur].filter((n) => n !== node)));
+      // A removed card's input is cleared, so its stage is skipped.
+      if (node === 'product') setProductFile(null);
+      if (node === 'restyle') setRestylePrompt('');
+      if (node === 'edit') setEditPrompt('');
+      if (node === 'voiceover') setScript('');
+    },
+    [job],
+  );
+
+  const addNode = useCallback(
+    (node: OptionalNode) => {
+      if (!canToggle(job, node)) return;
+      setPresent((cur) => new Set([...cur, node]));
+    },
+    [job],
+  );
+
+  // Cards are never really deleted: a removed optional node is hidden and its
+  // input cleared, so Delete/Backspace on a required card does nothing.
+  const onNodesChange = useCallback(
+    (changes: NodeChange<Node<AnyNodeData>>[]) => {
+      for (const change of changes) {
+        if (change.type !== 'remove') continue;
+        const node = optionalNodeOf(change.id);
+        if (node) removeNode(node);
+      }
+      onBaseNodesChange(changes.filter((c) => c.type !== 'remove'));
+    },
+    [onBaseNodesChange, removeNode],
+  );
+
+  const moveCards = useCallback(
+    (placement: Record<string, { x: number; y: number }>) =>
+      setNodes((ns) => ns.map((n) => (placement[n.id] ? { ...n, position: placement[n.id] } : n))),
+    [setNodes],
+  );
+
+  /** Palette "붙이기" button: the cards go back to their usual place. */
+  const attachAtHome = useCallback(
+    (node: OptionalNode) => {
+      const home = Object.fromEntries(buildInitialNodes().map((n) => [n.id, n.position]));
+      moveCards(Object.fromEntries(NODE_IDS[node].map((id) => [id, home[id]])));
+      addNode(node);
+    },
+    [addNode, moveCards],
+  );
+
+  const onDragOver = useCallback((event: React.DragEvent) => {
+    if (!event.dataTransfer.types.includes(PALETTE_MIME)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback(
+    (event: React.DragEvent) => {
+      const node = event.dataTransfer.getData(PALETTE_MIME) as OptionalNode;
+      if (!node || !flow || !canToggle(job, node)) return;
+      event.preventDefault();
+      moveCards(dropPlacement(node, flow.screenToFlowPosition({ x: event.clientX, y: event.clientY })));
+      addNode(node);
+    },
+    [flow, job, addNode, moveCards],
+  );
+
+  const overPalette = (event: MouseEvent | TouchEvent) => {
+    const point = 'touches' in event ? event.changedTouches[0] : event;
+    const rect = paletteRef.current?.getBoundingClientRect();
+    return Boolean(point && rect && point.clientX >= rect.left && point.clientX <= rect.right && point.clientY >= rect.top && point.clientY <= rect.bottom);
+  };
+
+  const onNodeDrag = useCallback((event: MouseEvent | TouchEvent, card: Node) => {
+    const node = optionalNodeOf(card.id);
+    setPaletteDropActive(Boolean(node && canToggle(job, node) && overPalette(event)));
+  }, [job]);
+
+  const onNodeDragStop = useCallback(
+    (event: MouseEvent | TouchEvent, card: Node) => {
+      setPaletteDropActive(false);
+      const node = optionalNodeOf(card.id);
+      if (node && overPalette(event)) removeNode(node);
+    },
+    [removeNode],
+  );
+
+  const lockReason = useCallback(
+    (node: OptionalNode) => {
+      if (canToggle(job, node)) return null;
+      return node === 'product' ? '작업을 만든 뒤에는 바꿀 수 없음' : '미리보기 승인 전이거나 이미 실행된 단계';
+    },
+    [job],
+  );
+
   const handleReset = useCallback(() => {
+    setPresent(new Set(OPTIONAL_NODES));
     stopPolling();
     setJob(null);
     setErrorMessage(null);
@@ -402,11 +515,13 @@ export function Canvas() {
           ? () => handleRunStage(stage)
           : null,
       onRetrySegment: stage === 'generate' && job ? handleRetrySegment : null,
+      onRemove: isOptional(stage) && canToggle(job, stage) ? () => removeNode(stage) : null,
     });
+    const removeFor = (node: OptionalNode) => (canToggle(job, node) ? () => removeNode(node) : null);
     return {
       video: { url, onUrlChange: setUrl, disabled: inputsLocked },
       person: { title: '바꿀 인물', hint: '인물 사진', file: personFile, onFileChange: setPersonFile, disabled: photosLocked },
-      product: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: productFile, onFileChange: setProductFile, disabled: photosLocked },
+      product: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: productFile, onFileChange: setProductFile, disabled: photosLocked, onRemove: removeFor('product') },
       'restyle-prompt': {
         title: '의상·배경 프롬프트',
         placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오',
@@ -414,14 +529,16 @@ export function Canvas() {
         value: restylePrompt,
         onChange: setRestylePrompt,
         disabled: isSubmitting || !inputEditable(job, 'restyle'),
+        onRemove: removeFor('restyle'),
       },
       'edit-prompt': {
-        title: '보정 프롬프트',
+        title: '최종 보정 프롬프트',
         placeholder: '예: 조명을 더 따뜻하게',
         hint: '비우면 보정 없이 넘어갑니다',
         value: editPrompt,
         onChange: setEditPrompt,
         disabled: isSubmitting || !inputEditable(job, 'edit'),
+        onRemove: removeFor('edit'),
       },
       script: {
         title: '나레이션 대본',
@@ -430,6 +547,7 @@ export function Canvas() {
         value: script,
         onChange: setScript,
         disabled: isSubmitting || !inputEditable(job, 'voiceover'),
+        onRemove: removeFor('voiceover'),
       },
       generate: stageData('generate'),
       merge: stageData('merge'),
@@ -450,11 +568,14 @@ export function Canvas() {
         onPromptChange: setPreviewPrompt,
       },
     };
-  }, [url, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked]);
+  }, [url, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked, removeNode]);
 
   const renderNodes = useMemo(
-    () => nodes.map((node) => ({ ...node, data: dataById[node.id] ?? node.data })),
-    [nodes, dataById],
+    () => {
+      const hidden = hiddenNodeIds(present);
+      return nodes.map((node) => ({ ...node, hidden: hidden.has(node.id), data: dataById[node.id] ?? node.data }));
+    },
+    [nodes, dataById, present],
   );
 
   const onConnect = useCallback(
@@ -481,12 +602,26 @@ export function Canvas() {
   const runDisabled = locked || awaitingApproval || (job !== null && !remaining);
 
   return (
-    <div className="relative h-screen w-screen bg-[var(--canvas)]">
+    <div className="flex h-screen w-screen bg-[var(--canvas)]">
+      <NodePalette
+        ref={paletteRef}
+        present={present}
+        lockReason={lockReason}
+        onAttach={attachAtHome}
+        onDetach={removeNode}
+        dropActive={paletteDropActive}
+      />
+    <div className="relative h-full flex-1" onDragOver={onDragOver} onDrop={onDrop}>
       <div className="pointer-events-none absolute left-5 top-4 z-10 flex items-center gap-3 text-[13px] font-medium text-[var(--ink)]">
         <span>얼굴·제품 교체 워크플로</span>
+        {(workerMock || job?.mock) && (
+          <span className="rounded-full border border-[var(--text-edge)] bg-[var(--card)] px-2.5 py-1 text-[12px] font-normal text-[var(--ink)]">
+            테스트 모드 · 크레딧을 쓰지 않습니다 (결과는 원본 영상 그대로)
+          </span>
+        )}
         {job?.previewRequired && job.totals && (
           <span className="rounded-full border border-[var(--card-border-strong)] bg-[var(--card)] px-2.5 py-1 text-[12px] font-normal text-[var(--ink-muted)]">
-            미리보기 {job.totals.previews}회 · {job.totals.credits}크레딧 · 약 {job.totals.krw.toLocaleString()}원
+            {job.mock ? '실제였다면 ' : ''}미리보기 {job.totals.previews}회 · {job.totals.credits}크레딧 · 약 {job.totals.krw.toLocaleString()}원
           </span>
         )}
       </div>
@@ -542,12 +677,18 @@ export function Canvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onInit={setFlow}
+        minZoom={0.2}
+        onNodeDrag={onNodeDrag}
+        onNodeDragStop={onNodeDragStop}
+        deleteKeyCode={['Backspace', 'Delete']}
         fitView
         fitViewOptions={{ padding: 0.08 }}
       >
         <Background variant={BackgroundVariant.Dots} color="var(--grid)" gap={22} size={1} />
         <Controls showInteractive={false} position="bottom-left" />
       </ReactFlow>
+    </div>
     </div>
   );
 }
