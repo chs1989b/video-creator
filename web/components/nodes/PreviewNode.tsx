@@ -6,6 +6,7 @@ import type { Attempt, Job, Verdict } from '../../lib/workerApi';
 import { REJECT_REASONS } from '../../lib/workerApi';
 import { latestAttempt, previewStatus } from '../../lib/previewRules';
 import { NodeCard } from './NodeCard';
+import { PromptRefiner } from '../PromptRefiner';
 
 export type PreviewNodeData = {
   job: Job | null;
@@ -91,8 +92,14 @@ export function PreviewNode({ data }: NodeProps & { data: PreviewNodeData }) {
             value={data.prompt}
             onChange={(e) => data.onPromptChange(e.target.value)}
             rows={2}
-            placeholder="다음 미리보기에서 바꿀 점 (영어, 선택) 예: Match the reference face closely."
+            placeholder="다음 미리보기에서 바꿀 점 (선택) 예: 얼굴을 더 닮게. 한국어로 적고 다듬기를 누르세요"
             className="nodrag w-full resize-none rounded-md border border-[var(--card-border)] bg-[var(--well)] px-2 py-1.5 text-[12px] text-[var(--ink)] placeholder:text-[var(--ink-faint)]"
+          />
+          <PromptRefiner
+            stage="face"
+            request={data.prompt}
+            rejectReasons={latest?.verdict === 'reject' ? latest.reasons : []}
+            onApply={data.onPromptChange}
           />
           <div className="text-[11px] text-[var(--ink-muted)]">인물·제품 사진을 바꾸면 다음 미리보기부터 적용됩니다</div>
         </div>

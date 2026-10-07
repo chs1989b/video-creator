@@ -530,6 +530,7 @@ export function Canvas() {
         onChange: setRestylePrompt,
         disabled: isSubmitting || !inputEditable(job, 'restyle'),
         onRemove: removeFor('restyle'),
+        refineStage: 'restyle',
       },
       'edit-prompt': {
         title: '최종 보정 프롬프트',
@@ -539,6 +540,7 @@ export function Canvas() {
         onChange: setEditPrompt,
         disabled: isSubmitting || !inputEditable(job, 'edit'),
         onRemove: removeFor('edit'),
+        refineStage: 'edit',
       },
       script: {
         title: '나레이션 대본',
