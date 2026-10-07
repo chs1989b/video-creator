@@ -32,6 +32,7 @@ export async function createJob(
     restylePrompt = null,
     editPrompt = null,
     previewRequired = false,
+    mock = false,
   },
 ) {
   return serialize(async () => {
@@ -50,6 +51,7 @@ export async function createJob(
       currentStage: null,
       stages: initialStages({ restylePrompt, editPrompt, script }),
       previewRequired,
+      mock,
       previewLimit: PREVIEW_LIMIT,
       attempts: [],
       approvedAttemptId: null,
@@ -69,7 +71,7 @@ export async function createJob(
 // Jobs written before the preview flow carry no preview fields; they behave
 // exactly as before (no preview required).
 function withPreviewDefaults(job) {
-  return { previewRequired: false, previewLimit: PREVIEW_LIMIT, attempts: [], approvedAttemptId: null, generatePrompt: null, ...job };
+  return { previewRequired: false, mock: false, previewLimit: PREVIEW_LIMIT, attempts: [], approvedAttemptId: null, generatePrompt: null, ...job };
 }
 
 // Jobs written before the per-stage model carry a flat status and no `stages`.

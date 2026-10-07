@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createApp } from '../src/server.js';
 import { createDb, updateJob } from '../src/pipeline/db.js';
+import { MOCK_DEPS } from '../src/pipeline/mockGenerators.js';
 
 async function startTestServer(overrides = {}) {
   const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'server-test-'));
@@ -14,6 +15,7 @@ async function startTestServer(overrides = {}) {
     runStage: overrides.runStage ?? (async (_db, _id, _dir, stage) => ({ stage })),
     retrySegment: overrides.retrySegment ?? (async () => ({ outputPath: '/tmp/generated-0.mp4' })),
     ...(overrides.runPreview ? { runPreview: overrides.runPreview } : {}),
+    ...(overrides.generator ? { generator: overrides.generator } : {}),
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -397,6 +399,59 @@ test('PATCH /jobs/:id adds or changes optional inputs; 404 unknown, 409 while ru
     const busy = await patch(job.id, { script: 'Changed.' });
     assert.equal(busy.status, 409);
     assert.match((await busy.json()).error, /already running/);
+  } finally {
+    server.close();
+  }
+});
+
+test('GET /config reports the generator; mock jobs are marked and run with the mock generators', async () => {
+  const seen = [];
+  const { server, baseUrl } = await startTestServer({
+    generator: 'mock',
+    runJob: async (_db, _id, _dir, deps) => { seen.push(['run', deps]); },
+    runPreview: async (_db, _id, _dir, _opts, deps) => { seen.push(['preview', deps]); },
+  });
+  try {
+    assert.deepEqual(await (await fetch(`${baseUrl}/config`)).json(), { generator: 'mock' });
+    const { job } = await createPreviewJob(baseUrl);
+    assert.equal(job.mock, true);
+
+    assert.equal((await fetch(`${baseUrl}/jobs/${job.id}/previews`, { method: 'POST', body: new FormData() })).status, 202);
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(seen[0][0], 'preview');
+    assert.equal(seen[0][1].generateFromSegment, MOCK_DEPS.generateFromSegment);
+    assert.equal(seen[0][1].editVideo, MOCK_DEPS.editVideo);
+    assert.equal(seen[0][1].synthesizeSpeech, MOCK_DEPS.synthesizeSpeech);
+  } finally {
+    server.close();
+  }
+
+  const real = await startTestServer();
+  try {
+    assert.deepEqual(await (await fetch(`${real.baseUrl}/config`)).json(), { generator: 'higgsfield' });
+  } finally {
+    real.server.close();
+  }
+});
+
+test('a job never runs under the other generator (no fake segments in a paid job, no credits on a test job)', async () => {
+  let started = 0;
+  const { server, baseUrl, dataDir } = await startTestServer({
+    runJob: async () => { started += 1; },
+    runStage: async () => { started += 1; },
+    runPreview: async () => { started += 1; },
+  });
+  try {
+    const { job } = await createPreviewJob(baseUrl);
+    assert.equal(job.mock, false);
+    await updateJob(createDb(path.join(dataDir, 'db.json')), job.id, { mock: true, approvedAttemptId: 'a1' });
+
+    for (const [method, route] of [['POST', 'previews'], ['POST', 'run'], ['POST', 'stages/merge/run'], ['POST', 'segments/0/retry']]) {
+      const res = await fetch(`${baseUrl}/jobs/${job.id}/${route}`, { method, body: route === 'previews' ? new FormData() : undefined });
+      assert.equal(res.status, 409, route);
+      assert.match((await res.json()).error, /test \(mock\) job/, route);
+    }
+    assert.equal(started, 0);
   } finally {
     server.close();
   }

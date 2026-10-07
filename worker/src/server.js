@@ -21,6 +21,7 @@ import {
   previewBlocker,
 } from './pipeline/preview.js';
 import { jobTotals, estimateRemaining } from './pipeline/costs.js';
+import { MOCK_DEPS } from './pipeline/mockGenerators.js';
 import { STAGE_ORDER } from './pipeline/stages.js';
 
 function optionalText(value) {
@@ -35,12 +36,25 @@ export function createApp({
   runPreview = defaultRunPreview,
   recordVerdict = defaultRecordVerdict,
   unlockPreview = defaultUnlockPreview,
+  generator = 'higgsfield',
 }) {
   const app = express();
   app.use(cors());
   app.use(express.json());
 
   const withTotals = (job) => ({ ...job, totals: jobTotals(job) });
+
+  // GENERATOR=mock swaps the three paid Higgsfield calls for free stand-ins.
+  // A job remembers which generator made it, and the other generator refuses
+  // to run it: no fake segments inside a paid job, no credits on a test job.
+  const mockMode = generator === 'mock';
+  const deps = mockMode ? MOCK_DEPS : undefined;
+  const generatorMismatch = (job) => {
+    if (Boolean(job.mock) === mockMode) return null;
+    return job.mock
+      ? 'this is a test (mock) job; run it on a worker started with GENERATOR=mock'
+      : 'this is a real job; the worker is in test (mock) mode and would write fake output into it';
+  };
   const needsApproval = (job) => job.previewRequired && !job.approvedAttemptId;
 
   const db = createDb(path.join(dataDir, 'db.json'));
@@ -70,6 +84,10 @@ export function createApp({
     });
   }
 
+  app.get('/config', (_req, res) => {
+    res.json({ generator: mockMode ? 'mock' : 'higgsfield' });
+  });
+
   app.post('/jobs', jobUploads, async (req, res) => {
     const { youtubeUrl } = req.body;
     if (!youtubeUrl) {
@@ -90,14 +108,14 @@ export function createApp({
     const editPrompt = optionalText(req.body.editPrompt);
     const previewRequired = req.body.preview === 'true';
     const job = await createJob(db, {
-      id, youtubeUrl, characterImagePaths, productImagePaths, script, restylePrompt, editPrompt, previewRequired,
+      id, youtubeUrl, characterImagePaths, productImagePaths, script, restylePrompt, editPrompt, previewRequired, mock: mockMode,
     });
 
     await fs.mkdir(workDirFor(id), { recursive: true });
 
     // autorun=false creates the job and waits for stage-by-stage requests.
     if (req.body.autorun !== 'false' && !previewRequired) {
-      startInBackground(`Job ${id}`, runJob(db, id, workDirFor(id)));
+      startInBackground(`Job ${id}`, runJob(db, id, workDirFor(id), deps));
     }
 
     res.status(201).json(withTotals(job));
@@ -145,11 +163,16 @@ export function createApp({
       res.status(409).json({ error: 'job is already running' });
       return;
     }
+    const mismatch = generatorMismatch(job);
+    if (mismatch) {
+      res.status(409).json({ error: mismatch });
+      return;
+    }
     if (needsApproval(job) && nextStage(job) === 'generate') {
       res.status(409).json({ error: APPROVAL_REQUIRED });
       return;
     }
-    startInBackground(`Job ${job.id}`, runJob(db, job.id, workDirFor(job.id)));
+    startInBackground(`Job ${job.id}`, runJob(db, job.id, workDirFor(job.id), deps));
     res.status(202).json({ ok: true });
   });
 
@@ -169,6 +192,11 @@ export function createApp({
       res.status(409).json({ error: 'job is already running' });
       return;
     }
+    const stageMismatch = generatorMismatch(job);
+    if (stageMismatch) {
+      res.status(409).json({ error: stageMismatch });
+      return;
+    }
     if (stage === 'generate' && needsApproval(job)) {
       res.status(409).json({ error: APPROVAL_REQUIRED });
       return;
@@ -182,7 +210,7 @@ export function createApp({
       res.status(409).json({ error: `stage ${stage} has no input and is skipped` });
       return;
     }
-    startInBackground(`Job ${id} stage ${stage}`, runStage(db, id, workDirFor(id), stage));
+    startInBackground(`Job ${id} stage ${stage}`, runStage(db, id, workDirFor(id), stage, deps));
     res.status(202).json({ ok: true, stage });
   });
 
@@ -211,7 +239,7 @@ export function createApp({
         res.status(404).json({ error: 'not found' });
         return;
       }
-      const blocker = previewBlocker(job);
+      const blocker = generatorMismatch(job) ?? previewBlocker(job);
       if (blocker) {
         res.status(409).json({ error: blocker });
         return;
@@ -221,7 +249,7 @@ export function createApp({
         characterImagePath: req.files?.characterImages?.[0]?.path ?? null,
         productImagePath: req.files?.productImages?.[0]?.path ?? null,
       };
-      const run = Promise.resolve(runPreview(db, job.id, workDirFor(job.id), options))
+      const run = Promise.resolve(runPreview(db, job.id, workDirFor(job.id), options, deps))
         .finally(() => previewInFlight.delete(id));
       started = true;
       startInBackground(`Job ${job.id} preview`, run);
@@ -281,8 +309,18 @@ export function createApp({
   });
 
   app.post('/jobs/:id/segments/:index/retry', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    if (!job) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    const mismatch = generatorMismatch(job);
+    if (mismatch) {
+      res.status(409).json({ error: mismatch });
+      return;
+    }
     try {
-      const result = await retrySegment(db, req.params.id, Number(req.params.index), workDirFor(req.params.id));
+      const result = await retrySegment(db, req.params.id, Number(req.params.index), workDirFor(req.params.id), deps);
       res.json({ ok: true, ...result });
     } catch (error) {
       res.status(500).json({ error: error.message });
