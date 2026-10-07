@@ -96,3 +96,16 @@ export function dropPlacement(node: OptionalNode, at: Point): Record<string, Poi
   if (node === 'product') return { product: at };
   return { [node]: at, [PROMPT_CARD[node]]: { x: at.x, y: at.y - PROMPT_ABOVE } };
 }
+
+/** Why a node cannot be attached or detached right now, or null when it can. */
+export function lockReason(job: Job | null, node: OptionalNode, present: Set<OptionalNode>): string | null {
+  if (canToggle(job, node) || !job) return null;
+  if (node === 'product') return '작업을 만든 뒤에는 바꿀 수 없음';
+  if (!job.previewRequired) return '예전 방식 작업이라 바꿀 수 없음';
+  if (!job.approvedAttemptId) return '미리보기를 승인한 뒤에 바꿀 수 있음';
+  const status = job.stages[node]?.status;
+  if (job.status === 'running' || status === 'running') return '실행 중에는 바꿀 수 없음';
+  if (status === 'done') return '이미 완료된 단계';
+  if (status === 'skipped') return present.has(node) ? '이 작업에서는 건너뛴 단계 (입력이 비어 있었음)' : '이 작업에서는 뺀 단계';
+  return '뒤 단계가 이미 실행되어 바꿀 수 없음';
+}

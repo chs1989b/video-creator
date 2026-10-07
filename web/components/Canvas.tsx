@@ -33,6 +33,7 @@ import {
   presentFromJob,
   optionalNodeOf,
   dropPlacement,
+  lockReason,
   type OptionalNode,
 } from '../lib/pipelineGraph';
 import {
@@ -489,12 +490,9 @@ export function Canvas() {
     [removeNode],
   );
 
-  const lockReason = useCallback(
-    (node: OptionalNode) => {
-      if (canToggle(job, node)) return null;
-      return node === 'product' ? '작업을 만든 뒤에는 바꿀 수 없음' : '미리보기 승인 전이거나 이미 실행된 단계';
-    },
-    [job],
+  const nodeLockReason = useCallback(
+    (node: OptionalNode) => lockReason(job, node, present),
+    [job, present],
   );
 
   const handleReset = useCallback(() => {
@@ -608,7 +606,7 @@ export function Canvas() {
       <NodePalette
         ref={paletteRef}
         present={present}
-        lockReason={lockReason}
+        lockReason={nodeLockReason}
         onAttach={attachAtHome}
         onDetach={removeNode}
         dropActive={paletteDropActive}

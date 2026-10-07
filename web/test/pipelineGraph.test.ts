@@ -85,3 +85,19 @@ test('dropPlacement puts the stage where it was dropped and its prompt card abov
     'edit-prompt': { x: 500, y: 140 },
   });
 });
+
+import { lockReason } from '../lib/pipelineGraph';
+
+test('lockReason says why a node cannot be attached or detached right now', () => {
+  const approved = { approvedAttemptId: 'a1' };
+  expect(lockReason(null, 'edit', new Set(OPTIONAL_NODES))).toBeNull();
+  expect(lockReason(job(approved), 'edit', new Set(OPTIONAL_NODES))).toBeNull();
+  expect(lockReason(job(), 'product', all)).toBe('작업을 만든 뒤에는 바꿀 수 없음');
+  expect(lockReason(job(), 'edit', all)).toBe('미리보기를 승인한 뒤에 바꿀 수 있음');
+  expect(lockReason(job({ ...approved, status: 'running' }, { restyle: 'running' }), 'edit', all)).toBe('실행 중에는 바꿀 수 없음');
+  const finished = job({ ...approved, status: 'done' }, { generate: 'done', merge: 'done', restyle: 'done', edit: 'skipped', voiceover: 'done' });
+  expect(lockReason(finished, 'restyle', all)).toBe('이미 완료된 단계');
+  expect(lockReason(finished, 'edit', new Set<OptionalNode>(['restyle', 'voiceover']))).toBe('이 작업에서는 뺀 단계');
+  expect(lockReason(finished, 'edit', all)).toBe('이 작업에서는 건너뛴 단계 (입력이 비어 있었음)');
+  expect(lockReason(job({ previewRequired: false }), 'edit', all)).toBe('예전 방식 작업이라 바꿀 수 없음');
+});
