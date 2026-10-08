@@ -1,7 +1,9 @@
 .DS_Store
 node_modules/
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
 *.log
 .worktrees/
 .superpowers/
@@ -15,3 +17,6 @@ docs/.pdca-snapshots/
 # local scratch (terminal pastes, screenshots)
 /test.md
 /SCR-*.png
+
+# editor / agent local state
+.claude/
