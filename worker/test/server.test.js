@@ -456,3 +456,60 @@ test('a job never runs under the other generator (no fake segments in a paid job
     server.close();
   }
 });
+
+async function createOwnedJob(baseUrl, owner) {
+  const form = new FormData();
+  form.append('youtubeUrl', 'https://example.com/v.mp4');
+  form.append('characterImages', new Blob([new Uint8Array([1, 2, 3])]), 'char.png');
+  form.append('preview', 'true');
+  const res = await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form, headers: owner ? { 'x-owner-id': owner } : {} });
+  return res.json();
+}
+
+test('jobs carry the x-owner-id they were created with, and GET /jobs shows only that owner\'s jobs', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const mine = await createOwnedJob(baseUrl, 'chris');
+    const theirs = await createOwnedJob(baseUrl, 'juwon');
+    await createOwnedJob(baseUrl, null);
+    assert.equal(mine.ownerId, 'chris');
+
+    const listed = await (await fetch(`${baseUrl}/jobs`, { headers: { 'x-owner-id': 'chris' } })).json();
+    assert.deepEqual(listed.map((j) => j.id), [mine.id]);
+    // Without the header (direct local calls, old clients) every job is listed, as before.
+    assert.equal((await (await fetch(`${baseUrl}/jobs`)).json()).length, 3);
+    assert.equal(theirs.ownerId, 'juwon');
+  } finally {
+    server.close();
+  }
+});
+
+test('another owner\'s job answers 404 on every job route', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const theirs = await createOwnedJob(baseUrl, 'juwon');
+    const as = { headers: { 'x-owner-id': 'chris' } };
+    const routes = [
+      ['GET', `/jobs/${theirs.id}`],
+      ['PATCH', `/jobs/${theirs.id}`],
+      ['POST', `/jobs/${theirs.id}/run`],
+      ['POST', `/jobs/${theirs.id}/stages/merge/run`],
+      ['POST', `/jobs/${theirs.id}/previews`],
+      ['POST', `/jobs/${theirs.id}/previews/unlock`],
+      ['POST', `/jobs/${theirs.id}/attempts/a1/verdict`],
+      ['GET', `/jobs/${theirs.id}/attempts/a1/output`],
+      ['GET', `/jobs/${theirs.id}/estimate`],
+      ['POST', `/jobs/${theirs.id}/segments/0/retry`],
+      ['GET', `/jobs/${theirs.id}/result`],
+      ['GET', `/jobs/${theirs.id}/stages/merge/output`],
+    ];
+    for (const [method, route] of routes) {
+      const res = await fetch(`${baseUrl}${route}`, { method, ...as });
+      assert.equal(res.status, 404, `${method} ${route}`);
+    }
+    // The owner still reaches it.
+    assert.equal((await fetch(`${baseUrl}/jobs/${theirs.id}`, { headers: { 'x-owner-id': 'juwon' } })).status, 200);
+  } finally {
+    server.close();
+  }
+});

@@ -84,6 +84,22 @@ export function createApp({
     });
   }
 
+  // The web app's proxy forwards the signed-in user as x-owner-id. With it, a
+  // request sees only that user's jobs; without it (direct local calls) the
+  // worker behaves as before. The worker itself has no login: this separates
+  // demo users on one machine, it does not make the worker safe to expose.
+  const ownerOf = (req) => req.get('x-owner-id') || null;
+  app.param('id', async (req, res, next, id) => {
+    const owner = ownerOf(req);
+    if (!owner) return next();
+    const job = await getJob(db, id);
+    if (job && job.ownerId !== owner) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    next();
+  });
+
   app.get('/config', (_req, res) => {
     res.json({ generator: mockMode ? 'mock' : 'higgsfield' });
   });
@@ -109,6 +125,7 @@ export function createApp({
     const previewRequired = req.body.preview === 'true';
     const job = await createJob(db, {
       id, youtubeUrl, characterImagePaths, productImagePaths, script, restylePrompt, editPrompt, previewRequired, mock: mockMode,
+      ownerId: ownerOf(req),
     });
 
     await fs.mkdir(workDirFor(id), { recursive: true });
@@ -121,8 +138,10 @@ export function createApp({
     res.status(201).json(withTotals(job));
   });
 
-  app.get('/jobs', async (_req, res) => {
-    res.json((await listJobs(db)).map(withTotals));
+  app.get('/jobs', async (req, res) => {
+    const owner = ownerOf(req);
+    const jobs = await listJobs(db);
+    res.json((owner ? jobs.filter((j) => j.ownerId === owner) : jobs).map(withTotals));
   });
 
   app.get('/jobs/:id', async (req, res) => {

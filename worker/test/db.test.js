@@ -99,3 +99,23 @@ test('jobs saved before the preview flow load with preview defaults', async () =
   assert.deepEqual(job.attempts, []);
   assert.equal(job.approvedAttemptId, null);
 });
+
+test('a job records its owner, and finishedAt follows the job status', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'db-test-'));
+  const db = createDb(path.join(tmpDir, 'db.json'));
+
+  const created = await createJob(db, { id: 'j', youtubeUrl: 'u', characterImagePaths: ['/c.png'], ownerId: 'chris' });
+  assert.equal(created.ownerId, 'chris');
+  assert.equal(created.finishedAt, null);
+  const unowned = await createJob(db, { id: 'k', youtubeUrl: 'u', characterImagePaths: ['/c.png'] });
+  assert.equal(unowned.ownerId, null);
+
+  assert.equal((await updateJob(db, 'j', { status: 'running' })).finishedAt, null);
+  const done = await updateJob(db, 'j', { status: 'done' });
+  assert.ok(!Number.isNaN(Date.parse(done.finishedAt)));
+  assert.equal((await updateJob(db, 'j', { status: 'running' })).finishedAt, null);
+  assert.ok((await updateJob(db, 'j', { status: 'failed' })).finishedAt);
+  // A status-less patch leaves it alone.
+  const kept = (await getJob(db, 'j')).finishedAt;
+  assert.equal((await updateJob(db, 'j', { error: 'x' })).finishedAt, kept);
+});

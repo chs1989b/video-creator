@@ -33,6 +33,7 @@ export async function createJob(
     editPrompt = null,
     previewRequired = false,
     mock = false,
+    ownerId = null,
   },
 ) {
   return serialize(async () => {
@@ -52,6 +53,7 @@ export async function createJob(
       stages: initialStages({ restylePrompt, editPrompt, script }),
       previewRequired,
       mock,
+      ownerId,
       previewLimit: PREVIEW_LIMIT,
       attempts: [],
       approvedAttemptId: null,
@@ -60,6 +62,7 @@ export async function createJob(
       resultPath: null,
       error: null,
       createdAt: new Date().toISOString(),
+      finishedAt: null,
     };
 
     db.data.jobs.push(job);
@@ -71,7 +74,10 @@ export async function createJob(
 // Jobs written before the preview flow carry no preview fields; they behave
 // exactly as before (no preview required).
 function withPreviewDefaults(job) {
-  return { previewRequired: false, mock: false, previewLimit: PREVIEW_LIMIT, attempts: [], approvedAttemptId: null, generatePrompt: null, ...job };
+  return {
+    previewRequired: false, mock: false, ownerId: null, finishedAt: null,
+    previewLimit: PREVIEW_LIMIT, attempts: [], approvedAttemptId: null, generatePrompt: null, ...job,
+  };
 }
 
 // Jobs written before the per-stage model carry a flat status and no `stages`.
@@ -107,6 +113,14 @@ export async function listJobs(db) {
   return db.data.jobs.map(normalizeJob);
 }
 
+// When a job stops (done/failed) record the time; starting it again clears it.
+function finishedPatch(patch) {
+  if (!('status' in patch)) return {};
+  if (patch.status === 'done' || patch.status === 'failed') return { finishedAt: new Date().toISOString() };
+  if (patch.status === 'running') return { finishedAt: null };
+  return {};
+}
+
 export async function updateJob(db, id, patch) {
   return serialize(async () => {
     await db.read();
@@ -114,7 +128,7 @@ export async function updateJob(db, id, patch) {
     if (!job) {
       throw new Error(`Job not found: ${id}`);
     }
-    Object.assign(job, patch);
+    Object.assign(job, patch, finishedPatch(patch));
     await db.write();
     return job;
   });
