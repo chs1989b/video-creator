@@ -23,6 +23,8 @@ import { StageNode, canRunStage, type StageNodeData } from './nodes/StageNode';
 import { ResultNode, type ResultNodeData } from './nodes/ResultNode';
 import { PreviewNode, type PreviewNodeData } from './nodes/PreviewNode';
 import { NodePalette, PALETTE_MIME } from './NodePalette';
+import { JobHistory } from './JobHistory';
+import { HiggsfieldConnect } from './HiggsfieldConnect';
 import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
 import {
   OPTIONAL_NODES,
@@ -157,6 +159,9 @@ export function Canvas() {
   const [editPrompt, setEditPrompt] = useState('');
   const [script, setScript] = useState('');
   const [previewPrompt, setPreviewPrompt] = useState('');
+  const [user, setUser] = useState<{ username: string; name: string } | null>(null);
+  // The last job is remembered per demo user, so signing in as someone else starts clean.
+  const lastJobKey = user ? `${LAST_JOB_KEY}:${user.username}` : null;
   const [workerMock, setWorkerMock] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -209,22 +214,66 @@ export function Canvas() {
       .catch(() => setWorkerMock(false));
   }, []);
 
-  // Reopen the last job, so a saved pipeline can be resumed after a reload.
+  // Signed-in demo user (the middleware already sent anyone else to /login).
   useEffect(() => {
-    const lastId = readStorage(LAST_JOB_KEY);
+    fetch('/api/auth/me')
+      .then(async (res) => {
+        if (res.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        if (res.ok) setUser(await res.json());
+      })
+      .catch(() => setErrorMessage('웹 서버에 연결할 수 없습니다.'));
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+    window.location.href = '/login';
+  }, []);
+
+  /** Put a saved job on the canvas: its inputs, its optional nodes, and polling if it is still running. */
+  const showJob = useCallback(
+    (saved: Job) => {
+      stopPolling();
+      setJob(saved);
+      setErrorMessage(null);
+      setUrl(saved.youtubeUrl ?? '');
+      setPersonFile(null);
+      setProductFile(null);
+      setPreviewPrompt('');
+      setRestylePrompt(saved.restylePrompt ?? '');
+      setEditPrompt(saved.editPrompt ?? '');
+      setScript(saved.script ?? '');
+      setPresent(presentFromJob(saved));
+      if (saved.status === 'running') startPolling(saved.id);
+    },
+    [startPolling, stopPolling],
+  );
+
+  // Reopen this user's last job, so a saved pipeline can be resumed after a reload.
+  useEffect(() => {
+    if (!lastJobKey) return;
+    const lastId = readStorage(lastJobKey);
     if (!lastId) return;
     getJob(lastId)
-      .then((saved) => {
-        setJob(saved);
-        if (saved.youtubeUrl) setUrl(saved.youtubeUrl);
-        if (saved.restylePrompt) setRestylePrompt(saved.restylePrompt);
-        if (saved.editPrompt) setEditPrompt(saved.editPrompt);
-        if (saved.script) setScript(saved.script);
-        setPresent(presentFromJob(saved));
-        if (saved.status === 'running') startPolling(saved.id);
-      })
-      .catch(() => writeStorage(LAST_JOB_KEY, null));
-  }, [startPolling]);
+      .then(showJob)
+      .catch(() => writeStorage(lastJobKey, null));
+  }, [lastJobKey, showJob]);
+
+  /** History panel: load another of this user's jobs. */
+  const openJob = useCallback(
+    async (id: string) => {
+      try {
+        const saved = await getJob(id);
+        showJob(saved);
+        if (lastJobKey) writeStorage(lastJobKey, saved.id);
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : '작업을 불러오지 못했습니다.');
+      }
+    },
+    [showJob, lastJobKey],
+  );
 
   useEffect(() => {
     setEdges(buildEdges(job, present));
@@ -256,7 +305,7 @@ export function Canvas() {
           preview: true,
         });
         setJob(created);
-        writeStorage(LAST_JOB_KEY, created.id);
+        if (lastJobKey) writeStorage(lastJobKey, created.id);
         if (autorun) startPolling(created.id);
         return created;
       } catch (error) {
@@ -266,7 +315,7 @@ export function Canvas() {
         setIsSubmitting(false);
       }
     },
-    [url, personFile, productFile, script, restylePrompt, editPrompt, startPolling],
+    [url, personFile, productFile, script, restylePrompt, editPrompt, startPolling, lastJobKey],
   );
 
   // Prompts/script typed after approval, not yet saved on the job.
@@ -500,8 +549,8 @@ export function Canvas() {
     stopPolling();
     setJob(null);
     setErrorMessage(null);
-    writeStorage(LAST_JOB_KEY, null);
-  }, [stopPolling]);
+    if (lastJobKey) writeStorage(lastJobKey, null);
+  }, [stopPolling, lastJobKey]);
 
   const dataById = useMemo<Record<string, AnyNodeData>>(() => {
     const stageData = (stage: StageName): StageNodeData => ({
@@ -627,6 +676,7 @@ export function Canvas() {
       </div>
 
       <div className="absolute right-5 top-4 z-10 flex items-center gap-2">
+        <HiggsfieldConnect />
         {job && (
           <button
             type="button"
@@ -645,7 +695,27 @@ export function Canvas() {
         >
           {theme === 'dark' ? '라이트' : '다크'}
         </button>
+        {user && (
+          <span className="flex items-center gap-2 rounded-full border border-[var(--card-border-strong)] bg-[var(--card)] py-1 pl-3 pr-1 text-[12px] text-[var(--ink)]">
+            {user.name}
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-full border border-[var(--card-border)] px-2.5 py-0.5 text-[11.5px] text-[var(--ink-muted)] hover:text-[var(--ink)]"
+            >
+              로그아웃
+            </button>
+          </span>
+        )}
       </div>
+
+      {user && (
+        <JobHistory
+          currentJobId={job?.id ?? null}
+          refreshKey={`${job?.id ?? ''}:${job?.status ?? ''}:${job?.attempts.length ?? 0}`}
+          onOpen={openJob}
+        />
+      )}
 
       {errorMessage && (
         <div

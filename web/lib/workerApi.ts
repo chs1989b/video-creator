@@ -65,11 +65,15 @@ export type Job = {
   previewLimit: number;
   attempts: Attempt[];
   approvedAttemptId: string | null;
+  /** Demo user who created the job (set by the web proxy); null for jobs made before login. */
+  ownerId?: string | null;
+  /** When the job last stopped as done or failed. */
+  finishedAt?: string | null;
   totals?: JobTotals;
 };
 
-const DEFAULT_BASE_URL =
-  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_WORKER_URL) || 'http://localhost:4000';
+// The web app's proxy (app/api/worker) forwards to the worker as the signed-in user.
+const DEFAULT_BASE_URL = '/api/worker';
 
 type ClientOptions = { baseUrl?: string; fetchFn?: typeof fetch };
 
@@ -144,6 +148,13 @@ export async function createJob(
   }
   const res = await request(`${baseUrl}/jobs`, { method: 'POST', body: form }, fetchFn, '작업 생성 실패');
   return res.json();
+}
+
+/** The signed-in user's jobs, newest first. */
+export async function listJobs({ baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {}): Promise<Job[]> {
+  const res = await request(`${baseUrl}/jobs`, {}, fetchFn, '작업 목록을 불러오지 못했습니다');
+  const jobs = (await res.json()) as Job[];
+  return [...jobs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function getJob(

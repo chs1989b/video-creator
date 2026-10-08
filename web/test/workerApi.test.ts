@@ -195,3 +195,12 @@ test('getConfig reads which generator the worker runs', async () => {
   expect(calls[0].url).toBe('http://w/config');
   expect(config.generator).toBe('mock');
 });
+
+import { listJobs } from '../lib/workerApi';
+
+test('the browser talks to the worker through the web proxy by default', async () => {
+  const { calls, fetchFn } = recordingFetch(200, []);
+  await listJobs({ fetchFn });
+  expect(calls[0].url).toBe('/api/worker/jobs');
+  expect(resultUrl('job-1')).toBe('/api/worker/jobs/job-1/result');
+});
