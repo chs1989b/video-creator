@@ -48,6 +48,7 @@ import {
   runJob,
   runStage,
   resultUrl,
+  jobImageUrl,
   stageOutputUrl,
   runPreview,
   sendVerdict,
@@ -602,8 +603,8 @@ export function Canvas() {
     const removeFor = (node: OptionalNode) => (canToggle(job, node) ? () => removeNode(node) : null);
     return {
       video: { url, onUrlChange: setUrl, file: sourceFile, onFileChange: setSourceFile, savedName: job?.sourceVideoName ?? null, disabled: inputsLocked },
-      person: { title: '바꿀 인물', hint: '인물 사진', file: personFile, onFileChange: setPersonFile, disabled: photosLocked },
-      product: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: productFile, onFileChange: setProductFile, disabled: photosLocked, onRemove: removeFor('product') },
+      person: { title: '바꿀 인물', hint: '인물 사진', file: personFile, onFileChange: setPersonFile, disabled: photosLocked, savedUrl: job ? jobImageUrl(job.id, 'character') : null },
+      product: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: productFile, onFileChange: setProductFile, disabled: photosLocked, onRemove: removeFor('product'), savedUrl: job?.productImagePaths?.length ? jobImageUrl(job.id, 'product') : null },
       'restyle-prompt': {
         title: '의상·배경 프롬프트',
         placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오',

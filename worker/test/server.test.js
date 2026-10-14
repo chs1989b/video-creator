@@ -305,6 +305,21 @@ test('before approval, /run and /stages/generate/run answer 409 and start nothin
   }
 });
 
+test('GET /jobs/:id/images/:kind serves the saved person photo, 404 for a missing product or unknown kind', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const { job } = await createPreviewJob(baseUrl);
+    const photo = await fetch(`${baseUrl}/jobs/${job.id}/images/character`);
+    assert.equal(photo.status, 200);
+    assert.match(photo.headers.get('content-type'), /^image\/png/);
+    assert.deepEqual([...new Uint8Array(await photo.arrayBuffer())], [1, 2, 3]);
+    assert.equal((await fetch(`${baseUrl}/jobs/${job.id}/images/product`)).status, 404);
+    assert.equal((await fetch(`${baseUrl}/jobs/${job.id}/images/source`)).status, 404);
+  } finally {
+    server.close();
+  }
+});
+
 test('verdict, unlock, attempt output and estimate routes', async () => {
   const { server, baseUrl, dataDir } = await startTestServer();
   try {
@@ -502,6 +517,7 @@ test('another owner\'s job answers 404 on every job route', async () => {
       ['POST', `/jobs/${theirs.id}/segments/0/retry`],
       ['GET', `/jobs/${theirs.id}/result`],
       ['GET', `/jobs/${theirs.id}/stages/merge/output`],
+      ['GET', `/jobs/${theirs.id}/images/character`],
     ];
     for (const [method, route] of routes) {
       const res = await fetch(`${baseUrl}${route}`, { method, ...as });

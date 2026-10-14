@@ -1,6 +1,6 @@
 import { test, expect } from 'vitest';
 import {
-  createJob, getJob, runJob, runStage, resultUrl, stageOutputUrl,
+  createJob, getJob, runJob, runStage, resultUrl, stageOutputUrl, jobImageUrl,
   runPreview, sendVerdict, unlockPreview, attemptOutputUrl, usedPreviews, updateJobInputs, getConfig, type Job,
 } from '../lib/workerApi';
 
@@ -118,6 +118,11 @@ test('connection failures produce a friendly message for every call', async () =
   ).rejects.toThrow(/워커 서버에 연결할 수 없습니다/);
   await expect(getJob('job-1', { fetchFn })).rejects.toThrow(/워커 서버에 연결할 수 없습니다/);
   await expect(runJob('job-1', { fetchFn })).rejects.toThrow(/워커 서버에 연결할 수 없습니다/);
+});
+
+test('jobImageUrl points at the saved person or product photo', () => {
+  expect(jobImageUrl('job-1', 'character', { baseUrl: 'http://localhost:4000' })).toBe('http://localhost:4000/jobs/job-1/images/character');
+  expect(jobImageUrl('job-1', 'product')).toBe('/api/worker/jobs/job-1/images/product');
 });
 
 test('resultUrl and stageOutputUrl build worker URLs', () => {

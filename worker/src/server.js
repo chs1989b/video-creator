@@ -417,6 +417,18 @@ export function createApp({
     res.sendFile(job.resultPath);
   });
 
+  // The saved person / product photo, so a reloaded job shows what it was made with.
+  // After approval these are the approved attempt's photos.
+  app.get('/jobs/:id/images/:kind', async (req, res) => {
+    const job = await getJob(db, req.params.id);
+    const paths = { character: job?.characterImagePaths, product: job?.productImagePaths }[req.params.kind];
+    if (!paths?.[0]) {
+      res.status(404).json({ error: 'no such image' });
+      return;
+    }
+    res.sendFile(paths[0]);
+  });
+
   // Any finished stage's video, so the canvas can preview intermediate output.
   app.get('/jobs/:id/stages/:stage/output', async (req, res) => {
     const job = await getJob(db, req.params.id);

@@ -229,6 +229,15 @@ export function resultUrl(jobId: string, { baseUrl = DEFAULT_BASE_URL }: { baseU
   return `${baseUrl}/jobs/${jobId}/result`;
 }
 
+/** The person or product photo saved with a job (the approved one after approval). */
+export function jobImageUrl(
+  jobId: string,
+  kind: 'character' | 'product',
+  { baseUrl = DEFAULT_BASE_URL }: { baseUrl?: string } = {},
+): string {
+  return `${baseUrl}/jobs/${jobId}/images/${kind}`;
+}
+
 export function stageOutputUrl(
   jobId: string,
   stage: StageName,
