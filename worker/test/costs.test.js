@@ -94,3 +94,25 @@ test('jobTotals counts only previews that were charged, like the card does (fail
   };
   assert.equal(jobTotals(job).previews, 2);
 });
+
+import { priceTable, estimateRemaining as remaining } from '../src/pipeline/costs.js';
+
+test('priceTable is what the web shows before spending: per-second price by resolution, won per credit, preview length', () => {
+  assert.deepEqual(priceTable(), {
+    creditKrw: 60, previewSeconds: 5, defaultResolution: '720p', perSecondByResolution: { '480p': 3, '720p': 7 },
+    flux: { perSecond: 1, max: 15 }, tts: { perCharacters: 40, perUnit: 0.15 },
+  });
+});
+
+test('the estimate includes the next preview price until a preview is approved', () => {
+  const base = {
+    resolution: '480p', previewRequired: true, approvedAttemptId: null,
+    segments: [seg(0, 0, 5), seg(1, 5, 17.04)],
+    stages: { generate: stage('pending'), merge: stage('pending'), restyle: stage('skipped'), edit: stage('skipped'), voiceover: stage('skipped') },
+  };
+  assert.equal(remaining(base).previewCredits, 15);
+  assert.equal(remaining({ ...base, segments: [] }).previewCredits, 15); // before the split: 5 s
+  assert.equal(remaining({ ...base, resolution: '720p', segments: [] }).previewCredits, 35);
+  assert.equal(remaining({ ...base, approvedAttemptId: 'a1' }).previewCredits, null);
+  assert.equal(remaining({ ...base, previewRequired: false }).previewCredits, null);
+});

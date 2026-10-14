@@ -30,7 +30,7 @@ import { previewAllowed, unlockAllowed, inputEditable, approvalWaitLabel } from 
 import { sourceInputError } from '../lib/sourceInput';
 import { modeBanner, type ModeBanner } from '../lib/modeBanner';
 import { jobVideoSeconds } from '../lib/narration';
-import { DEFAULT_RESOLUTION, previewCredits, generateCredits, toKrw, type Resolution } from '../lib/costs';
+import { DEFAULT_RESOLUTION, previewCreditsFor, resolutionOptions, toKrw, type PriceTable, type Resolution } from '../lib/costs';
 import {
   OPTIONAL_NODES,
   hiddenNodeIds,
@@ -108,7 +108,7 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
     { id: 'video', type: 'videoInput', position: { x: 0, y: 40 }, data: { url: '', onUrlChange: noop, file: null, onFileChange: noop, savedName: null, disabled: false } },
     { id: 'person', type: 'imageInput', position: { x: 20, y: 300 }, data: { title: '바꿀 인물', hint: '인물 사진', file: null, onFileChange: noop, disabled: false } },
     { id: 'product', type: 'imageInput', position: { x: 20, y: 560 }, data: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: null, onFileChange: noop, disabled: false } },
-    { id: 'preview', type: 'preview', position: { x: 340, y: 260 }, data: { job: null, onRunPreview: null, onVerdict: null, onUnlock: null, attemptUrl: () => '', previewCredits: previewCredits(DEFAULT_RESOLUTION), resolution: DEFAULT_RESOLUTION, onResolutionChange: null, prompt: '', onPromptChange: noop } },
+    { id: 'preview', type: 'preview', position: { x: 340, y: 260 }, data: { job: null, onRunPreview: null, onVerdict: null, onUnlock: null, attemptUrl: () => '', previewCredits: null, resolutionOptions: [], resolution: DEFAULT_RESOLUTION, onResolutionChange: null, prompt: '', onPromptChange: noop } },
     { id: 'generate', type: 'stage', position: { x: 630, y: 300 }, data: stage('generate') },
     { id: 'merge', type: 'stage', position: { x: 920, y: 300 }, data: stage('merge') },
     { id: 'restyle-prompt', type: 'textInput', position: { x: 920, y: 40 }, data: { title: '의상·배경 프롬프트', placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오', hint: '비우면 의상·배경은 그대로', value: '', onChange: noop, disabled: false } },
@@ -185,6 +185,8 @@ export function Canvas() {
   // The last job is remembered per demo user, so signing in as someone else starts clean.
   const lastJobKey = user ? `${LAST_JOB_KEY}:${user.username}` : null;
   const [workerMock, setWorkerMock] = useState(false);
+  // Prices come from the worker's own table; null until /config answers.
+  const [prices, setPrices] = useState<PriceTable | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -232,7 +234,10 @@ export function Canvas() {
   // Test mode: a worker started with GENERATOR=mock spends no credits.
   useEffect(() => {
     getConfig()
-      .then((config) => setWorkerMock(config.generator === 'mock'))
+      .then((config) => {
+        setWorkerMock(config.generator === 'mock');
+        setPrices(config.prices ?? null);
+      })
       .catch(() => setWorkerMock(false));
   }, []);
 
@@ -423,8 +428,9 @@ export function Canvas() {
 
   const handleUnlock = useCallback(async () => {
     if (!job) return;
-    const cost = previewCredits(job.resolution);
-    if (!window.confirm(`미리보기 1회를 더 허용할까요? 약 ${cost}크레딧(약 ${toKrw(cost).toLocaleString()}원)이 듭니다.`)) return;
+    const cost = job.estimate?.previewCredits;
+    const price = cost == null ? '' : ` 약 ${cost}크레딧${prices ? `(약 ${toKrw(prices, cost).toLocaleString()}원)` : ''}이 듭니다.`;
+    if (!window.confirm(`미리보기 1회를 더 허용할까요?${price}`)) return;
     try {
       setJob(await unlockPreview(job.id));
     } catch (error) {
@@ -650,9 +656,8 @@ export function Canvas() {
         onVerdict: job ? handleVerdict : null,
         onUnlock: job && unlockAllowed(job) ? handleUnlock : null,
         attemptUrl: (attemptId: string) => (job ? attemptOutputUrl(job.id, attemptId) : ''),
-        previewCredits: job?.segments[0]
-          ? generateCredits(job.segments[0].endSeconds - job.segments[0].startSeconds, job.resolution)
-          : previewCredits(resolution),
+        previewCredits: job ? job.estimate?.previewCredits ?? null : prices ? previewCreditsFor(prices, resolution) : null,
+        resolutionOptions: prices ? resolutionOptions(prices) : [],
         resolution: ((job?.resolution as Resolution | undefined) ?? resolution),
         onResolutionChange: job ? null : setResolution,
         prompt: previewPrompt,
@@ -703,6 +708,7 @@ export function Canvas() {
         onAttach={attachAtHome}
         onDetach={removeNode}
         dropActive={paletteDropActive}
+        prices={prices}
       />
     <div className="relative h-full flex-1" onDragOver={onDragOver} onDrop={onDrop}>
       <div className="pointer-events-none absolute left-5 top-4 z-10 flex items-center gap-3 text-[13px] font-medium text-[var(--ink)]">

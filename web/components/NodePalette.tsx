@@ -2,17 +2,18 @@
 
 import { forwardRef } from 'react';
 import { OPTIONAL_LABELS, OPTIONAL_NODES, type OptionalNode } from '../lib/pipelineGraph';
+import { optionalStageCosts, type PriceTable } from '../lib/costs';
 
 /** dataTransfer type for a palette tile dragged onto the canvas. */
 export const PALETTE_MIME = 'application/x-pipeline-node';
 
 const REQUIRED = ['원본 영상', '바꿀 인물', '미리보기 (5초)', '나머지 구간 생성', '구간 이어붙이기', '완성 영상'];
 
-const DESCRIPTIONS: Record<OptionalNode, { what: string; cost: string }> = {
-  product: { what: '손에 든 제품까지 교체', cost: '추가 크레딧 0 (인물 교체와 한 번에)' },
-  restyle: { what: '옷·배경을 프롬프트로 다시 그림', cost: '초당 약 1크레딧, 최대 15' },
-  edit: { what: '조명·톤 등 마무리 보정', cost: '초당 약 1크레딧, 최대 15' },
-  voiceover: { what: '대본을 한국어·영어 음성으로 얹음 (목소리 4종)', cost: '대본 40자마다 0.15크레딧' },
+const DESCRIPTIONS: Record<OptionalNode, string> = {
+  product: '손에 든 제품까지 교체',
+  restyle: '옷·배경을 프롬프트로 다시 그림',
+  edit: '조명·톤 등 마무리 보정',
+  voiceover: '대본을 한국어·영어 음성으로 얹음 (목소리 4종)',
 };
 
 type Props = {
@@ -23,6 +24,8 @@ type Props = {
   onDetach: (node: OptionalNode) => void;
   /** A canvas card is being dragged over the palette: dropping it detaches it. */
   dropActive: boolean;
+  /** Prices from the worker; null until /config answers. */
+  prices: PriceTable | null;
 };
 
 /**
@@ -30,9 +33,10 @@ type Props = {
  * tiles that can be dragged onto the canvas (attach) or dragged back (detach).
  */
 export const NodePalette = forwardRef<HTMLElement, Props>(function NodePalette(
-  { present, lockReason, onAttach, onDetach, dropActive },
+  { present, lockReason, onAttach, onDetach, dropActive, prices },
   ref,
 ) {
+  const costs = optionalStageCosts(prices);
   return (
     <aside
       ref={ref}
@@ -84,8 +88,8 @@ export const NodePalette = forwardRef<HTMLElement, Props>(function NodePalette(
                     {attached ? '떼기' : '붙이기'}
                   </button>
                 </div>
-                <div className="mt-0.5 text-[11.5px] leading-snug text-[var(--ink-muted)]">{DESCRIPTIONS[node].what}</div>
-                <div className="text-[11px] text-[var(--ink-faint)]">{DESCRIPTIONS[node].cost}</div>
+                <div className="mt-0.5 text-[11.5px] leading-snug text-[var(--ink-muted)]">{DESCRIPTIONS[node]}</div>
+                <div className="text-[11px] text-[var(--ink-faint)]">{node === 'product' ? '추가 크레딧 0 (인물 교체와 한 번에)' : costs[node]}</div>
                 <div className="mt-1 text-[11px]" style={{ color: attached ? 'var(--media)' : 'var(--ink-faint)' }}>
                   {reason ?? (attached ? '● 캔버스에 붙어 있음' : '○ 끌어서 캔버스에 놓기')}
                 </div>

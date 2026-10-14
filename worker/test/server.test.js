@@ -360,7 +360,9 @@ test('verdict, unlock, attempt output and estimate routes', async () => {
     });
     assert.equal(again.status, 409);
 
+    const fromJob = (await (await fetch(`${baseUrl}/jobs/${job.id}`)).json()).estimate;
     const estimate = await (await fetch(`${baseUrl}/jobs/${job.id}/estimate`)).json();
+    assert.deepEqual(fromJob, estimate, 'every job response carries the same estimate');
     assert.deepEqual(estimate.items, [{ stage: 'generate', credits: 70 }]);
     assert.equal(estimate.krw, 4200);
   } finally {
@@ -427,7 +429,8 @@ test('GET /config reports the generator; mock jobs are marked and run with the m
     runPreview: async (_db, _id, _dir, _opts, deps) => { seen.push(['preview', deps]); },
   });
   try {
-    assert.deepEqual(await (await fetch(`${baseUrl}/config`)).json(), { generator: 'mock' });
+    assert.deepEqual(await (await fetch(`${baseUrl}/config`)).json(), { generator: 'mock', prices: { creditKrw: 60, previewSeconds: 5, defaultResolution: '720p', perSecondByResolution: { '480p': 3, '720p': 7 },
+    flux: { perSecond: 1, max: 15 }, tts: { perCharacters: 40, perUnit: 0.15 } } });
     const { job } = await createPreviewJob(baseUrl);
     assert.equal(job.mock, true);
 
@@ -443,7 +446,8 @@ test('GET /config reports the generator; mock jobs are marked and run with the m
 
   const real = await startTestServer();
   try {
-    assert.deepEqual(await (await fetch(`${real.baseUrl}/config`)).json(), { generator: 'higgsfield' });
+    assert.deepEqual(await (await fetch(`${real.baseUrl}/config`)).json(), { generator: 'higgsfield', prices: { creditKrw: 60, previewSeconds: 5, defaultResolution: '720p', perSecondByResolution: { '480p': 3, '720p': 7 },
+    flux: { perSecond: 1, max: 15 }, tts: { perCharacters: 40, perUnit: 0.15 } } });
   } finally {
     real.server.close();
   }

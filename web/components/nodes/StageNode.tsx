@@ -4,7 +4,6 @@ import type { NodeProps } from '@xyflow/react';
 import type { Job, StageName } from '../../lib/workerApi';
 import { STAGE_ORDER } from '../../lib/workerApi';
 import { NodeCard, type Tone } from './NodeCard';
-import { generateCredits } from '../../lib/costs';
 import { inputEditable } from '../../lib/previewRules';
 
 export type Stage = StageName;
@@ -48,11 +47,12 @@ export function canRunStage(job: Job | null, stage: Stage): boolean {
 }
 
 /** "나머지 25초 만들기 · 약 175크레딧" — only the segments that still need generating. */
-function generateButtonLabel(job: Job | null, failed: boolean): string {
+export function generateButtonLabel(job: Job | null, failed: boolean): string {
   const pending = (job?.segments ?? []).filter((s) => s.status !== 'done');
   if (pending.length === 0) return failed ? '이 단계 다시 실행' : '이 단계만 실행';
   const seconds = Math.round(pending.reduce((sum, s) => sum + (s.endSeconds - s.startSeconds), 0));
-  return `나머지 ${seconds}초 만들기 · 약 ${generateCredits(seconds, job?.resolution)}크레딧`;
+  const credits = job?.estimate?.items.find((i) => i.stage === 'generate')?.credits;
+  return credits === undefined ? `나머지 ${seconds}초 만들기` : `나머지 ${seconds}초 만들기 · 약 ${credits}크레딧`;
 }
 
 const OPTIONAL = ['restyle', 'edit', 'voiceover'] as const;

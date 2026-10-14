@@ -6,7 +6,7 @@ import type { Attempt, Job, Verdict } from '../../lib/workerApi';
 import { REJECT_REASONS } from '../../lib/workerApi';
 import { latestAttempt, previewStatus } from '../../lib/previewRules';
 import { NodeCard } from './NodeCard';
-import { RESOLUTIONS, previewCredits as previewCreditsFor, type Resolution } from '../../lib/costs';
+import type { Resolution } from '../../lib/costs';
 import { PromptRefiner } from '../PromptRefiner';
 
 export type PreviewNodeData = {
@@ -17,7 +17,10 @@ export type PreviewNodeData = {
   /** Present when the limit is reached and one more preview may be allowed. */
   onUnlock: (() => void) | null;
   attemptUrl: (attemptId: string) => string;
-  previewCredits: number;
+  /** One preview's price from the worker, null until known. */
+  previewCredits: number | null;
+  /** Resolutions the worker prices, each with one preview's cost. */
+  resolutionOptions: { resolution: string; previewCredits: number }[];
   /** Generation resolution; onResolutionChange is null once the job exists (it is fixed then). */
   resolution: Resolution;
   onResolutionChange: ((r: Resolution) => void) | null;
@@ -54,16 +57,16 @@ export function PreviewNode({ data }: NodeProps & { data: PreviewNodeData }) {
         <span>화질</span>
         {data.onResolutionChange ? (
           <div role="radiogroup" aria-label="생성 화질" className="grid flex-1 grid-cols-2 gap-1 rounded-md bg-[var(--well)] p-0.5">
-            {RESOLUTIONS.map((r) => (
+            {(data.resolutionOptions.length ? data.resolutionOptions : [{ resolution: data.resolution, previewCredits: null }]).map(({ resolution: r, previewCredits }) => (
               <button
                 key={r}
                 type="button"
                 role="radio"
                 aria-checked={data.resolution === r}
-                onClick={() => data.onResolutionChange?.(r)}
+                onClick={() => data.onResolutionChange?.(r as Resolution)}
                 className={`rounded py-0.5 ${data.resolution === r ? 'bg-[var(--card)] font-medium text-[var(--ink)] shadow-sm' : 'hover:text-[var(--ink)]'}`}
               >
-                {r} · {previewCreditsFor(r)}
+                {previewCredits === null ? r : `${r} · ${previewCredits}`}
               </button>
             ))}
           </div>
@@ -137,7 +140,7 @@ export function PreviewNode({ data }: NodeProps & { data: PreviewNodeData }) {
           onClick={data.onRunPreview}
           className="mt-2 w-full rounded-md border border-[var(--card-border-strong)] py-1.5 text-[12.5px] font-medium text-[var(--ink)] transition-colors hover:border-[var(--media)] hover:text-[var(--media)]"
         >
-          미리보기 만들기 · 약 {data.previewCredits}크레딧
+          {data.previewCredits === null ? '미리보기 만들기' : `미리보기 만들기 · 약 ${data.previewCredits}크레딧`}
         </button>
       )}
 

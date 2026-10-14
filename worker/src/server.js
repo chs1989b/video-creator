@@ -20,7 +20,7 @@ import {
   unlockPreview as defaultUnlockPreview,
   previewBlocker,
 } from './pipeline/preview.js';
-import { jobTotals, estimateRemaining, RESOLUTIONS, DEFAULT_RESOLUTION } from './pipeline/costs.js';
+import { jobTotals, estimateRemaining, priceTable, RESOLUTIONS, DEFAULT_RESOLUTION } from './pipeline/costs.js';
 import { jobStats } from './pipeline/stats.js';
 import { VOICES, DEFAULT_VOICE_KEY, isVoiceKey } from './pipeline/voices.js';
 import { MOCK_DEPS } from './pipeline/mockGenerators.js';
@@ -54,7 +54,7 @@ export function createApp({
   app.use(cors());
   app.use(express.json());
 
-  const withTotals = (job) => ({ ...job, totals: jobTotals(job) });
+  const withTotals = (job) => ({ ...job, totals: jobTotals(job), estimate: estimateRemaining(job) });
 
   // GENERATOR=mock swaps the three paid Higgsfield calls for free stand-ins.
   // A job remembers which generator made it, and the other generator refuses
@@ -150,7 +150,7 @@ export function createApp({
   });
 
   app.get('/config', (_req, res) => {
-    res.json({ generator: mockMode ? 'mock' : 'higgsfield' });
+    res.json({ generator: mockMode ? 'mock' : 'higgsfield', prices: priceTable() });
   });
 
   app.post('/jobs', jobUploads, async (req, res) => {

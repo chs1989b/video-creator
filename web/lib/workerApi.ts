@@ -1,3 +1,4 @@
+import type { PriceTable } from './costs';
 export type JobSegment = {
   index: number;
   path: string;
@@ -76,6 +77,8 @@ export type Job = {
   /** When the job last stopped as done or failed. */
   finishedAt?: string | null;
   totals?: JobTotals;
+  /** Remaining cost and the next preview's price, computed by the worker. */
+  estimate?: JobEstimate;
 };
 
 // The web app's proxy (app/api/worker) forwards to the worker as the signed-in user.
@@ -337,7 +340,15 @@ export function voiceSampleUrl(key: string, lang: 'ko' | 'en', { baseUrl = DEFAU
   return `${baseUrl}/voices/${key}/sample?lang=${lang}`;
 }
 
-export type WorkerConfig = { generator: 'higgsfield' | 'mock' };
+export type JobEstimate = {
+  items: { stage: StageName; credits: number }[];
+  credits: number;
+  krw: number;
+  /** One more preview, or null once previews are over for this job. */
+  previewCredits: number | null;
+};
+
+export type WorkerConfig = { generator: 'higgsfield' | 'mock'; prices: PriceTable };
 
 /** Which generator the worker runs: 'mock' spends no credits (test mode). */
 export async function getConfig(

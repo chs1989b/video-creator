@@ -1,8 +1,7 @@
-// One place for every price and preview policy. Values come from real runs
-// (docs/higgsfield-cli-notes.md): ad_multiplier billed 70 for 10 s and 49.28
-// for 7.04 s (7 per second); FLUX edit is quoted 15 per 10 s; TTS charged 0.45.
-// Where a quote and a charge differ we keep the higher number, so what the
-// screen promises is never less than what gets spent.
+// One place for every price and preview policy; the web shows these numbers
+// from GET /config and the estimate on each job, never its own copy.
+// Values come from real runs (docs/higgsfield-cli-notes.md, measured again
+// against account transactions on 2026-10-14).
 export const CREDIT_KRW = Number(process.env.CREDIT_KRW ?? 60); // Plus plan
 export const PREVIEW_SECONDS = 5;
 export const PREVIEW_LIMIT = 5;
@@ -66,6 +65,26 @@ export function jobTotals(job) {
   return { previews, credits, krw: toKrw(credits) };
 }
 
+/** The prices the web needs before a job exists (GET /config). */
+export function priceTable() {
+  return {
+    creditKrw: CREDIT_KRW,
+    previewSeconds: PREVIEW_SECONDS,
+    defaultResolution: DEFAULT_RESOLUTION,
+    perSecondByResolution: { ...RATES.ad_multiplier.perSecondByResolution },
+    flux: { ...RATES.flux_3_video_edit },
+    tts: { ...RATES.text2speech_v2 },
+  };
+}
+
+/** What one more preview costs, or null once previews are over for this job. */
+function nextPreviewCredits(job) {
+  if (!job.previewRequired || job.approvedAttemptId) return null;
+  const first = job.segments[0];
+  const seconds = first ? segmentSeconds(first) : PREVIEW_SECONDS;
+  return estimateCredits('ad_multiplier', { seconds, resolution: job.resolution });
+}
+
 export function estimateRemaining(job) {
   const items = [];
   const pending = job.segments.filter((s) => s.status !== 'done');
@@ -79,5 +98,5 @@ export function estimateRemaining(job) {
     }
   }
   const credits = round2(items.reduce((sum, i) => sum + i.credits, 0));
-  return { items, credits, krw: toKrw(credits) };
+  return { items, credits, krw: toKrw(credits), previewCredits: nextPreviewCredits(job) };
 }
