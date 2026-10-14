@@ -100,3 +100,24 @@ export function estimateRemaining(job) {
   const credits = round2(items.reduce((sum, i) => sum + i.credits, 0));
   return { items, credits, krw: toKrw(credits), previewCredits: nextPreviewCredits(job) };
 }
+
+/**
+ * Records made before the 10/14 measurement priced FLUX at 15 per started 10 s
+ * and TTS at 0.45 a run. Re-price finished stages that recorded a price with
+ * today's table (segments and previews were already right). Used once by
+ * scripts/reprice-records.mjs; stages without a recorded price stay untouched.
+ */
+export function repriceFinishingStages(job) {
+  const stages = { ...job.stages };
+  const changes = [];
+  for (const stage of PRICED_STAGES) {
+    const state = stages[stage];
+    if (state?.status !== 'done' || typeof state.credits !== 'number') continue;
+    const to = stageCredits(job, stage);
+    if (to !== state.credits) {
+      changes.push({ stage, from: state.credits, to });
+      stages[stage] = { ...state, credits: to };
+    }
+  }
+  return { stages, changes };
+}

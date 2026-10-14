@@ -116,3 +116,26 @@ test('the estimate includes the next preview price until a preview is approved',
   assert.equal(remaining({ ...base, approvedAttemptId: 'a1' }).previewCredits, null);
   assert.equal(remaining({ ...base, previewRequired: false }).previewCredits, null);
 });
+
+import { repriceFinishingStages } from '../src/pipeline/costs.js';
+
+test('repriceFinishingStages re-prices finished FLUX/TTS stages with today\'s table and leaves the rest alone', () => {
+  // The real 10/14 job: recorded 30 and 0.45 with the old table; charged 15 and 0.15.
+  const job = {
+    script: '이 아이라이너는 한 번에 부드럽게 그려지고, 하루 종일 번지지 않아요.',
+    segments: [seg(0, 0, 5, { status: 'done', credits: 0 }), seg(1, 5, 17.04, { status: 'done', credits: 84.28 })],
+    stages: {
+      generate: stage('done'), merge: stage('done'),
+      restyle: stage('done', { credits: 30 }), edit: stage('skipped'), voiceover: stage('done', { credits: 0.45 }),
+    },
+  };
+  const { stages, changes } = repriceFinishingStages(job);
+  assert.equal(stages.restyle.credits, 15);
+  assert.equal(stages.voiceover.credits, 0.15);
+  assert.equal(stages.edit.credits, undefined);
+  assert.deepEqual(changes, [{ stage: 'restyle', from: 30, to: 15 }, { stage: 'voiceover', from: 0.45, to: 0.15 }]);
+
+  // Stages that never recorded a price (jobs older than the price table) stay as they are.
+  const old = { ...job, stages: { ...job.stages, restyle: stage('done'), voiceover: stage('done') } };
+  assert.deepEqual(repriceFinishingStages(old).changes, []);
+});
