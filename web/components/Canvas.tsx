@@ -28,6 +28,7 @@ import { StatsPanel } from './StatsPanel';
 import { HiggsfieldConnect } from './HiggsfieldConnect';
 import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
 import { sourceInputError } from '../lib/sourceInput';
+import { modeBanner, type ModeBanner } from '../lib/modeBanner';
 import { DEFAULT_RESOLUTION, previewCredits, generateCredits, toKrw, type Resolution } from '../lib/costs';
 import {
   OPTIONAL_NODES,
@@ -84,6 +85,11 @@ type AnyNodeData =
   | PreviewNodeData;
 
 const POLL_INTERVAL_MS = 2000;
+const BANNER_BORDER: Record<ModeBanner['tone'], string> = {
+  mock: 'border-[var(--text-edge)]',
+  real: 'border-[var(--media)]',
+  warn: 'border-[var(--danger)]',
+};
 const LAST_JOB_KEY = 'video-creator:last-job';
 const THEME_KEY = 'video-creator:theme';
 
@@ -682,6 +688,8 @@ export function Canvas() {
               : '남은 단계 모두 실행';
   const runDisabled = locked || awaitingApproval || (job !== null && !remaining);
 
+  const banner = modeBanner(workerMock, job);
+
   return (
     <div className="flex h-screen w-screen bg-[var(--canvas)]">
       <NodePalette
@@ -695,9 +703,9 @@ export function Canvas() {
     <div className="relative h-full flex-1" onDragOver={onDragOver} onDrop={onDrop}>
       <div className="pointer-events-none absolute left-5 top-4 z-10 flex items-center gap-3 text-[13px] font-medium text-[var(--ink)]">
         <span>얼굴·제품 교체 워크플로</span>
-        {(workerMock || job?.mock) && (
-          <span className="rounded-full border border-[var(--text-edge)] bg-[var(--card)] px-2.5 py-1 text-[12px] font-normal text-[var(--ink)]">
-            테스트 모드 · 크레딧을 쓰지 않습니다 (결과는 원본 영상 그대로)
+        {banner && (
+          <span className={`rounded-full border ${BANNER_BORDER[banner.tone]} bg-[var(--card)] px-2.5 py-1 text-[12px] font-normal text-[var(--ink)]`}>
+            {banner.text}
           </span>
         )}
         {job?.previewRequired && job.totals && (
