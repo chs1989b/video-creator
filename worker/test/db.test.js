@@ -119,3 +119,17 @@ test('a job records its owner, and finishedAt follows the job status', async () 
   const kept = (await getJob(db, 'j')).finishedAt;
   assert.equal((await updateJob(db, 'j', { error: 'x' })).finishedAt, kept);
 });
+
+test('a job made from an uploaded file keeps its path and original name; URL jobs have none', async () => {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'db-test-'));
+  const db = createDb(path.join(tmpDir, 'db.json'));
+  const fromFile = await createJob(db, {
+    id: 'f', youtubeUrl: null, sourceVideoPath: '/data/uploads/x.mp4', sourceVideoName: 'review.mp4', characterImagePaths: ['/c.png'],
+  });
+  assert.equal(fromFile.youtubeUrl, null);
+  assert.equal(fromFile.sourceVideoPath, '/data/uploads/x.mp4');
+  assert.equal(fromFile.sourceVideoName, 'review.mp4');
+  const fromUrl = await createJob(db, { id: 'u', youtubeUrl: 'https://e.com/v.mp4', characterImagePaths: ['/c.png'] });
+  assert.equal(fromUrl.sourceVideoPath, null);
+  assert.equal(fromUrl.sourceVideoName, null);
+});

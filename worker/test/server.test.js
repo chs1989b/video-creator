@@ -513,3 +513,56 @@ test('another owner\'s job answers 404 on every job route', async () => {
     server.close();
   }
 });
+
+function sourceForm({ url, video } = {}) {
+  const form = new FormData();
+  if (url) form.append('youtubeUrl', url);
+  if (video) form.append('sourceVideo', new Blob([new Uint8Array([0, 0, 0, 24])]), video);
+  form.append('characterImages', new Blob([new Uint8Array([1, 2, 3])]), 'char.png');
+  form.append('preview', 'true');
+  return form;
+}
+
+test('POST /jobs accepts an uploaded source video instead of a URL', async () => {
+  const { server, baseUrl, dataDir } = await startTestServer();
+  try {
+    const res = await fetch(`${baseUrl}/jobs`, { method: 'POST', body: sourceForm({ video: 'My Review.MOV' }) });
+    assert.equal(res.status, 201);
+    const job = await res.json();
+    assert.equal(job.youtubeUrl, null);
+    assert.equal(job.sourceVideoName, 'My Review.MOV');
+    assert.ok(job.sourceVideoPath.startsWith(path.join(dataDir, 'uploads')));
+    assert.ok(job.sourceVideoPath.toLowerCase().endsWith('.mov'));
+    await fs.access(job.sourceVideoPath);
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /jobs needs exactly one source: a URL or a video file of an allowed type', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const cases = [
+      [{}, /원본 영상/],
+      [{ url: 'https://e.com/v.mp4', video: 'v.mp4' }, /하나만/],
+      [{ video: 'notes.txt' }, /mp4/],
+    ];
+    for (const [input, message] of cases) {
+      const res = await fetch(`${baseUrl}/jobs`, { method: 'POST', body: sourceForm(input) });
+      assert.equal(res.status, 400, JSON.stringify(input));
+      assert.match((await res.json()).error, message);
+    }
+  } finally {
+    server.close();
+  }
+});
+
+test('POST /jobs keeps a Korean source file name readable', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const job = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: sourceForm({ video: '내 리뷰 영상.mp4' }) })).json();
+    assert.equal(job.sourceVideoName, '내 리뷰 영상.mp4');
+  } finally {
+    server.close();
+  }
+});

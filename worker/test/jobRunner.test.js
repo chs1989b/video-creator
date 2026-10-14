@@ -319,3 +319,21 @@ test('inputs of a stage that ran, or that sits before a stage that ran, cannot c
   await updateJob(db, 'job-1', { status: 'running' });
   await assert.rejects(updateJobInputs(db, 'job-1', { script: 'x' }), /already running/);
 });
+
+test('ensureSegments splits an uploaded source file without downloading anything', async () => {
+  const { db, tmpDir } = await setup({ youtubeUrl: null });
+  const uploaded = path.join(tmpDir, 'upload-abc.mov');
+  await fs.writeFile(uploaded, 'fake video bytes');
+  await updateJob(db, 'job-1', { sourceVideoPath: uploaded, sourceVideoName: 'my-review.mov' });
+  let splitFrom = null;
+  const d = resolveDeps(happyDeps({
+    downloadVideo: async () => { throw new Error('must not download an uploaded source'); },
+    splitIntoSegments: async (filePath) => { splitFrom = filePath; return twoSegments(); },
+  }));
+
+  const job = await ensureSegments(db, 'job-1', tmpDir, d);
+
+  assert.equal(splitFrom, path.join(tmpDir, 'source.mov'));
+  assert.equal(await fs.readFile(splitFrom, 'utf8'), 'fake video bytes');
+  assert.equal(job.segments.length, 2);
+});

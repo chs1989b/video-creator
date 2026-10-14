@@ -28,6 +28,16 @@ function optionalText(value) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+// Original source video (instead of a URL): common phone/camera formats, up to 200MB.
+const SOURCE_EXTENSIONS = ['.mp4', '.mov', '.m4v', '.webm'];
+const MAX_UPLOAD_BYTES = 200 * 1024 * 1024;
+
+// multer 1.x reads multipart file names as latin1; browsers send UTF-8, so a
+// Korean name arrives garbled unless it is decoded again.
+function originalName(file) {
+  return Buffer.from(file.originalname, 'latin1').toString('utf8');
+}
+
 export function createApp({
   dataDir,
   runJob = defaultRunJob,
@@ -66,14 +76,24 @@ export function createApp({
     destination: (_req, _file, cb) => cb(null, uploadsDir),
     // multer's default filename has no extension, which breaks CLIs (like the
     // Higgsfield CLI) that detect media type from the file extension.
-    filename: (_req, file, cb) => cb(null, `${randomUUID()}${path.extname(file.originalname)}`),
+    filename: (_req, file, cb) => cb(null, `${randomUUID()}${path.extname(originalName(file)).toLowerCase()}`),
   });
-  const upload = multer({ storage });
+  const upload = multer({ storage, limits: { fileSize: MAX_UPLOAD_BYTES } });
 
-  const jobUploads = upload.fields([
+  // multer errors (too large) answer as JSON instead of an HTML error page.
+  const withUploadErrors = (handler) => (req, res, next) => handler(req, res, (error) => {
+    if (!error) return next();
+    const tooLarge = error.code === 'LIMIT_FILE_SIZE';
+    res.status(tooLarge ? 413 : 400).json({
+      error: tooLarge ? `파일은 ${MAX_UPLOAD_BYTES / 1024 / 1024}MB 이하만 올릴 수 있습니다.` : error.message,
+    });
+  });
+
+  const jobUploads = withUploadErrors(upload.fields([
+    { name: 'sourceVideo', maxCount: 1 },
     { name: 'characterImages', maxCount: 1 },
     { name: 'productImages', maxCount: 1 },
-  ]);
+  ]));
 
   const workDirFor = (id) => path.join(dataDir, 'jobs', id);
 
@@ -105,16 +125,21 @@ export function createApp({
   });
 
   app.post('/jobs', jobUploads, async (req, res) => {
-    const { youtubeUrl } = req.body;
-    if (!youtubeUrl) {
-      res.status(400).json({ error: 'youtubeUrl is required' });
-      return;
+    const youtubeUrl = optionalText(req.body.youtubeUrl);
+    const sourceFile = req.files?.sourceVideo?.[0] ?? null;
+    const reject = async (error) => {
+      // Nothing keeps a rejected request's uploads, so remove them now.
+      const uploaded = Object.values(req.files ?? {}).flat();
+      await Promise.all(uploaded.map((file) => fs.rm(file.path, { force: true })));
+      res.status(400).json({ error });
+    };
+    if (!youtubeUrl && !sourceFile) return reject('원본 영상 링크나 파일이 필요합니다.');
+    if (youtubeUrl && sourceFile) return reject('원본 영상은 링크와 파일 중 하나만 보내 주세요.');
+    if (sourceFile && !SOURCE_EXTENSIONS.includes(path.extname(originalName(sourceFile)).toLowerCase())) {
+      return reject(`원본 영상 파일은 ${SOURCE_EXTENSIONS.map((e) => e.slice(1)).join(', ')}만 받습니다.`);
     }
     const characterFiles = req.files?.characterImages ?? [];
-    if (characterFiles.length !== 1) {
-      res.status(400).json({ error: 'exactly one characterImages file is required' });
-      return;
-    }
+    if (characterFiles.length !== 1) return reject('exactly one characterImages file is required');
 
     const id = randomUUID();
     const characterImagePaths = characterFiles.map((file) => file.path);
@@ -126,6 +151,8 @@ export function createApp({
     const job = await createJob(db, {
       id, youtubeUrl, characterImagePaths, productImagePaths, script, restylePrompt, editPrompt, previewRequired, mock: mockMode,
       ownerId: ownerOf(req),
+      sourceVideoPath: sourceFile?.path ?? null,
+      sourceVideoName: sourceFile ? originalName(sourceFile) : null,
     });
 
     await fs.mkdir(workDirFor(id), { recursive: true });

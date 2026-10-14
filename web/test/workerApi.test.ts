@@ -204,3 +204,12 @@ test('the browser talks to the worker through the web proxy by default', async (
   expect(calls[0].url).toBe('/api/worker/jobs');
   expect(resultUrl('job-1')).toBe('/api/worker/jobs/job-1/result');
 });
+
+test('createJob sends an uploaded source video instead of a URL', async () => {
+  const { calls, fetchFn } = recordingFetch();
+  const video = new File(['vid'], '리뷰.mov', { type: 'video/quicktime' });
+  await createJob({ sourceVideo: video, characterImage: fakeFile('char.png') }, { fetchFn });
+  const body = calls[0].init.body as FormData;
+  expect((body.get('sourceVideo') as File).name).toBe('리뷰.mov');
+  expect(body.get('youtubeUrl')).toBeNull();
+});

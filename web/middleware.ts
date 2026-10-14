@@ -13,4 +13,7 @@ export async function middleware(request: NextRequest) {
   return NextResponse.redirect(login);
 }
 
-export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'] };
+// /api/worker is left out on purpose: Next.js cuts request bodies that pass
+// through middleware at 10MB, which breaks source video uploads. That route
+// checks the session itself (401 without one), so it stays protected.
+export const config = { matcher: ['/((?!_next/static|_next/image|favicon.ico|api/worker).*)'] };

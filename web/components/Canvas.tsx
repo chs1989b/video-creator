@@ -26,6 +26,7 @@ import { NodePalette, PALETTE_MIME } from './NodePalette';
 import { JobHistory } from './JobHistory';
 import { HiggsfieldConnect } from './HiggsfieldConnect';
 import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
+import { sourceInputError } from '../lib/sourceInput';
 import {
   OPTIONAL_NODES,
   hiddenNodeIds,
@@ -90,7 +91,7 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
   const noop = () => {};
   const stage = (s: StageName): StageNodeData => ({ stage: s, job: null, outputUrl: null, onRun: null, onRetrySegment: null });
   return [
-    { id: 'video', type: 'videoInput', position: { x: 0, y: 40 }, data: { url: '', onUrlChange: noop, disabled: false } },
+    { id: 'video', type: 'videoInput', position: { x: 0, y: 40 }, data: { url: '', onUrlChange: noop, file: null, onFileChange: noop, savedName: null, disabled: false } },
     { id: 'person', type: 'imageInput', position: { x: 20, y: 300 }, data: { title: '바꿀 인물', hint: '인물 사진', file: null, onFileChange: noop, disabled: false } },
     { id: 'product', type: 'imageInput', position: { x: 20, y: 560 }, data: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: null, onFileChange: noop, disabled: false } },
     { id: 'preview', type: 'preview', position: { x: 340, y: 260 }, data: { job: null, onRunPreview: null, onVerdict: null, onUnlock: null, attemptUrl: () => '', previewCredits: PREVIEW_CREDITS, prompt: '', onPromptChange: noop } },
@@ -153,6 +154,7 @@ export function Canvas() {
 
   const [theme, setTheme] = useState<Theme>('dark');
   const [url, setUrl] = useState('');
+  const [sourceFile, setSourceFile] = useState<File | null>(null);
   const [personFile, setPersonFile] = useState<File | null>(null);
   const [productFile, setProductFile] = useState<File | null>(null);
   const [restylePrompt, setRestylePrompt] = useState('');
@@ -239,6 +241,7 @@ export function Canvas() {
       setJob(saved);
       setErrorMessage(null);
       setUrl(saved.youtubeUrl ?? '');
+      setSourceFile(null);
       setPersonFile(null);
       setProductFile(null);
       setPreviewPrompt('');
@@ -287,15 +290,17 @@ export function Canvas() {
 
   const submit = useCallback(
     async (autorun: boolean) => {
-      if (!url || !personFile) {
-        setErrorMessage('원본 영상 링크와 바꿀 인물 사진이 필요합니다.');
+      const sourceError = sourceInputError({ url, file: sourceFile });
+      if (sourceError || !personFile) {
+        setErrorMessage(sourceError ?? '바꿀 인물 사진이 필요합니다.');
         return null;
       }
       setErrorMessage(null);
       setIsSubmitting(true);
       try {
         const created = await createJob({
-          youtubeUrl: url,
+          youtubeUrl: sourceFile ? null : url,
+          sourceVideo: sourceFile,
           characterImage: personFile,
           productImage: productFile,
           script,
@@ -315,7 +320,7 @@ export function Canvas() {
         setIsSubmitting(false);
       }
     },
-    [url, personFile, productFile, script, restylePrompt, editPrompt, startPolling, lastJobKey],
+    [url, sourceFile, personFile, productFile, script, restylePrompt, editPrompt, startPolling, lastJobKey],
   );
 
   // Prompts/script typed after approval, not yet saved on the job.
@@ -566,7 +571,7 @@ export function Canvas() {
     });
     const removeFor = (node: OptionalNode) => (canToggle(job, node) ? () => removeNode(node) : null);
     return {
-      video: { url, onUrlChange: setUrl, disabled: inputsLocked },
+      video: { url, onUrlChange: setUrl, file: sourceFile, onFileChange: setSourceFile, savedName: job?.sourceVideoName ?? null, disabled: inputsLocked },
       person: { title: '바꿀 인물', hint: '인물 사진', file: personFile, onFileChange: setPersonFile, disabled: photosLocked },
       product: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: productFile, onFileChange: setProductFile, disabled: photosLocked, onRemove: removeFor('product') },
       'restyle-prompt': {
@@ -617,7 +622,7 @@ export function Canvas() {
         onPromptChange: setPreviewPrompt,
       },
     };
-  }, [url, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked, removeNode]);
+  }, [url, sourceFile, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked, removeNode]);
 
   const renderNodes = useMemo(
     () => {

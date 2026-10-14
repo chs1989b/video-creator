@@ -34,6 +34,8 @@ export async function createJob(
     previewRequired = false,
     mock = false,
     ownerId = null,
+    sourceVideoPath = null,
+    sourceVideoName = null,
   },
 ) {
   return serialize(async () => {
@@ -43,6 +45,8 @@ export async function createJob(
     const job = {
       id,
       youtubeUrl,
+      sourceVideoPath,
+      sourceVideoName,
       characterImagePaths,
       productImagePaths,
       script,
@@ -75,7 +79,7 @@ export async function createJob(
 // exactly as before (no preview required).
 function withPreviewDefaults(job) {
   return {
-    previewRequired: false, mock: false, ownerId: null, finishedAt: null,
+    previewRequired: false, mock: false, ownerId: null, finishedAt: null, sourceVideoPath: null, sourceVideoName: null,
     previewLimit: PREVIEW_LIMIT, attempts: [], approvedAttemptId: null, generatePrompt: null, ...job,
   };
 }

@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { downloadVideo as defaultDownloadVideo } from './download.js';
 import { splitIntoSegments as defaultSplitIntoSegments } from './segment.js';
@@ -74,10 +75,22 @@ export const APPROVAL_REQUIRED = 'approve a preview before generating the remain
 const generateCredits = (segment) => estimateCredits('ad_multiplier', { seconds: segmentSeconds(segment) });
 
 /** Download and split only once; a resumed job keeps its segments. Shared by generate and preview. */
+// An uploaded source is copied into the job folder, so the job keeps working
+// even if the upload is cleaned up later; no download, no yt-dlp.
+async function copyUploadedSource(uploadPath, workDir) {
+  const ext = (path.extname(uploadPath) || '.mp4').toLowerCase();
+  const sourcePath = path.join(workDir, `source${ext}`);
+  await fs.mkdir(workDir, { recursive: true });
+  await fs.copyFile(uploadPath, sourcePath);
+  return sourcePath;
+}
+
 export async function ensureSegments(db, jobId, workDir, d) {
   const job = await requireJob(db, jobId);
   if (job.segments.length > 0) return job;
-  const { filePath: sourcePath } = await d.downloadVideo(job.youtubeUrl, workDir);
+  const sourcePath = job.sourceVideoPath
+    ? await copyUploadedSource(job.sourceVideoPath, workDir)
+    : (await d.downloadVideo(job.youtubeUrl, workDir)).filePath;
   const options = job.previewRequired ? { firstSegmentSeconds: PREVIEW_SECONDS } : {};
   const segments = await d.splitIntoSegments(sourcePath, workDir, 10, options);
   await updateJob(db, jobId, {

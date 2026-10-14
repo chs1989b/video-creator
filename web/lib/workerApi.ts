@@ -45,8 +45,11 @@ export const REJECT_REASONS = ['얼굴', '제품', '동작', '배경', '기타']
 export const PREVIEW_CREDITS = 35;
 
 export type Job = {
+  /** Set when the source was uploaded instead of linked. */
+  sourceVideoPath?: string | null;
+  sourceVideoName?: string | null;
   id: string;
-  youtubeUrl: string;
+  youtubeUrl: string | null;
   characterImagePaths: string[];
   productImagePaths: string[];
   script: string | null;
@@ -99,7 +102,10 @@ async function request(
 }
 
 export type CreateJobInput = {
-  youtubeUrl: string;
+  /** The source as a link… */
+  youtubeUrl?: string | null;
+  /** …or as an uploaded file (exactly one of the two). */
+  sourceVideo?: File | null;
   characterImage: File;
   productImage?: File | null;
   script?: string | null;
@@ -113,7 +119,8 @@ export type CreateJobInput = {
 
 export async function createJob(
   {
-    youtubeUrl,
+    youtubeUrl = null,
+    sourceVideo = null,
     characterImage,
     productImage = null,
     script = null,
@@ -125,7 +132,8 @@ export async function createJob(
   { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
 ): Promise<Job> {
   const form = new FormData();
-  form.append('youtubeUrl', youtubeUrl);
+  if (sourceVideo) form.append('sourceVideo', sourceVideo);
+  else if (youtubeUrl) form.append('youtubeUrl', youtubeUrl);
   form.append('characterImages', characterImage);
   if (productImage) {
     form.append('productImages', productImage);
