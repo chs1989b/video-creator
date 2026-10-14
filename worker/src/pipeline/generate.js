@@ -52,7 +52,7 @@ export async function generateFromSegment(
   segmentPath,
   characterImagePath,
   outputPath,
-  { execFile = defaultExecFile, productImagePath, prompt } = {},
+  { execFile = defaultExecFile, productImagePath, prompt, resolution } = {},
 ) {
   const mutedSegmentPath = path.join(
     path.dirname(segmentPath),
@@ -78,6 +78,7 @@ export async function generateFromSegment(
         '--prompt', finalPrompt,
         '--video-references', mutedSegmentPath,
         ...imageArgs,
+        ...(resolution ? ['--resolution', resolution] : []),
         '--wait', '--json',
       ],
       { timeout: GENERATE_TIMEOUT_MS },

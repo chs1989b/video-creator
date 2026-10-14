@@ -256,3 +256,21 @@ higgsfield generate create flux_3_video_edit --prompt "<보정 지시>" --video-
 **비용 실측 vs 조회값**: TTS(`text2speech_v2`) 조회 0.3 → 실차감 0.45("Voiceover" 항목), FLUX 편집 조회 15 → 실차감 9.71(2회 모두). `generate cost`는 대략치로만 볼 것; 실제 금액은 `account transactions`.
 
 **교훈(9/22)**: 업로드가 느린 환경에서는 워커의 파일 경로 전달 방식이 취약함. 대안으로 (a) 워커가 `upload create`로 먼저 올리고 ID로 `generate create`를 호출하도록 분리하면 실패 지점을 좁히고 재시도도 단계별로 할 수 있음, (b) 세그먼트 파일 크기 축소. 둘 다 아직 미구현 — 안정 네트워크에서 현 코드로 먼저 성공을 확인한 뒤 판단.
+
+
+## 2026-10-14 — 실제 크레딧 검증(Task 10)과 해상도·나레이션 실측
+
+`account transactions` 기준 실제 차감:
+
+| 항목 | 실측 | 비고 |
+|---|---|---|
+| `ad_multiplier` 5초 미리보기 | 480p **15** / 720p **35** | 초당 3 / 7 — 화면 예상과 정확히 일치 |
+| `ad_multiplier` 나머지 12.04초(720p) | **84.28** | 초당 7, 일치 |
+| `flux_3_video_edit` 17.04초 | **15** | 9.71초 → 9.71, 15.04초 → 15 와 함께 보면 **초당 1, 최대 15**(17초까지 측정) |
+| `text2speech_v2`(ElevenLabs) | 39자 **0.15** · 69자 **0.3** · 117자 **0.45** | **40자마다 0.15** |
+
+- `generate cost`(무료) 해상도별, 같은 10초: `ad_multiplier`·`hf_mult_motion_control`(Genjutsu) 480p 30 / 720p 70 / 1080p 160.
+- 480p 결과는 882×464, 720p는 1322×696. 480p는 얼굴이 참고 이미지와 덜 닮고 원본 요소(머리 수건·옷)가 더 남는 경향(프레임 3장 관찰) —
+  사용자 판단: **480p도 쓸 만함**, 5초 미리보기로 승인 판단 가능.
+- 워커 `costs.js` 단가를 위 실측으로 보정(FLUX `perSecond 1, max 15`, TTS `perCharacters 40 × 0.15`).
+- 목소리 후보 10개 음 높이(F0 중앙값) — 여성 Brielle 225·Hana 190·Elena 222·Maya 229·Luna 308Hz, 남성 Ken 124·Marcus 132·Julian 142Hz, Andre 167Hz(경계).

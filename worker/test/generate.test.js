@@ -275,3 +275,15 @@ test('generateFromSegment falls back to the default prompt when none is given', 
   const hf = calls.find((c) => c.command === 'higgsfield');
   assert.match(hf.args[hf.args.indexOf('--prompt') + 1], /Replace the person in the video/);
 });
+
+test('generateFromSegment asks for the requested resolution', async () => {
+  const calls = [];
+  const fakeExecFile = async (command, args) => {
+    calls.push({ command, args });
+    if (command === 'higgsfield') return { stdout: JSON.stringify([{ id: 'j', status: 'completed', result_url: 'https://e.com/r.mp4' }]), stderr: '' };
+    return { stdout: '', stderr: '' };
+  };
+  await generateFromSegment('/tmp/s.mp4', '/tmp/c.png', '/tmp/o.mp4', { execFile: fakeExecFile, resolution: '480p' });
+  const args = calls.find((c) => c.command === 'higgsfield').args;
+  assert.equal(args[args.indexOf('--resolution') + 1], '480p');
+});

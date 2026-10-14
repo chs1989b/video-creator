@@ -6,6 +6,7 @@ import type { Attempt, Job, Verdict } from '../../lib/workerApi';
 import { REJECT_REASONS } from '../../lib/workerApi';
 import { latestAttempt, previewStatus } from '../../lib/previewRules';
 import { NodeCard } from './NodeCard';
+import { RESOLUTIONS, previewCredits as previewCreditsFor, type Resolution } from '../../lib/costs';
 import { PromptRefiner } from '../PromptRefiner';
 
 export type PreviewNodeData = {
@@ -17,6 +18,9 @@ export type PreviewNodeData = {
   onUnlock: (() => void) | null;
   attemptUrl: (attemptId: string) => string;
   previewCredits: number;
+  /** Generation resolution; onResolutionChange is null once the job exists (it is fixed then). */
+  resolution: Resolution;
+  onResolutionChange: ((r: Resolution) => void) | null;
   /** What to change in the next preview (English, optional). */
   prompt: string;
   onPromptChange: (value: string) => void;
@@ -44,6 +48,28 @@ export function PreviewNode({ data }: NodeProps & { data: PreviewNodeData }) {
     <NodeCard title="미리보기 (5초)" width={240} tone={tone} input output>
       <div className="text-[13px] leading-snug" style={{ color: tone === 'idle' ? 'var(--ink-muted)' : 'var(--ink)' }}>
         {text}
+      </div>
+
+      <div className="nodrag mt-2 flex items-center gap-2 text-[11.5px] text-[var(--ink-muted)]">
+        <span>화질</span>
+        {data.onResolutionChange ? (
+          <div role="radiogroup" aria-label="생성 화질" className="grid flex-1 grid-cols-2 gap-1 rounded-md bg-[var(--well)] p-0.5">
+            {RESOLUTIONS.map((r) => (
+              <button
+                key={r}
+                type="button"
+                role="radio"
+                aria-checked={data.resolution === r}
+                onClick={() => data.onResolutionChange?.(r)}
+                className={`rounded py-0.5 ${data.resolution === r ? 'bg-[var(--card)] font-medium text-[var(--ink)] shadow-sm' : 'hover:text-[var(--ink)]'}`}
+              >
+                {r} · {previewCreditsFor(r)}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <span className="text-[var(--ink)]">{data.resolution} <span className="text-[var(--ink-faint)]">(작업을 만든 뒤에는 바꿀 수 없음)</span></span>
+        )}
       </div>
 
       {latest?.status === 'done' && (

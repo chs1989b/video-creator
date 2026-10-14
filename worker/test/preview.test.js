@@ -171,3 +171,16 @@ test('unlock is refused unless a preview job has used up its limit, and never af
   const { db: plainDb } = await setup({ previewRequired: false });
   await assert.rejects(unlockPreview(plainDb, 'job-1'), /does not use previews/);
 });
+
+test('a 480p job previews and generates at 480p and records the 480p price', async () => {
+  const { db, tmpDir } = await setup({ resolution: '480p' });
+  const generated = [];
+  const attempt = await runPreview(db, 'job-1', tmpDir, {}, deps(generated));
+  assert.equal(generated[0].resolution, '480p');
+  assert.equal(attempt.credits, 15); // 5 s × 3
+  await recordVerdict(db, 'job-1', attempt.id, { verdict: 'approve' });
+  await runStage(db, 'job-1', tmpDir, 'generate', deps(generated));
+  assert.deepEqual(generated.slice(1).map((g) => g.resolution), ['480p', '480p']);
+  const job = await getJob(db, 'job-1');
+  assert.deepEqual(job.segments.map((s) => s.credits), [0, 30, 30]);
+});

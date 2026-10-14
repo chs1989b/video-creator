@@ -281,8 +281,8 @@ test('finishing stages record their estimated credits', async () => {
   await runJob(db, 'job-1', tmpDir, happyDeps());
 
   const job = await getJob(db, 'job-1');
-  assert.equal(job.stages.restyle.credits, 30); // 15-second video -> 2 x 15
-  assert.equal(job.stages.voiceover.credits, 0.45);
+  assert.equal(job.stages.restyle.credits, 15); // 15-second video -> 1/s, at most 15
+  assert.equal(job.stages.voiceover.credits, 0.15); // 'Hi.' -> one 40-character unit
   assert.equal(job.stages.edit.credits ?? null, null); // skipped: nothing spent
 });
 

@@ -73,7 +73,7 @@ function previousStageDone(job, stage) {
 
 export const APPROVAL_REQUIRED = 'approve a preview before generating the remaining segments';
 
-const generateCredits = (segment) => estimateCredits('ad_multiplier', { seconds: segmentSeconds(segment) });
+const generateCredits = (segment, resolution) => estimateCredits('ad_multiplier', { seconds: segmentSeconds(segment), resolution });
 
 /** Download and split only once; a resumed job keeps its segments. Shared by generate and preview. */
 // An uploaded source is copied into the job folder, so the job keeps working
@@ -113,8 +113,9 @@ async function stageGenerate(db, jobId, workDir, d) {
       await d.generateFromSegment(segment.path, job.characterImagePaths[0], outputPath, {
         productImagePath: job.productImagePaths?.[0],
         prompt: job.generatePrompt,
+        resolution: job.resolution,
       });
-      await setSegmentStatus(db, jobId, segment.index, 'done', outputPath, null, generateCredits(segment));
+      await setSegmentStatus(db, jobId, segment.index, 'done', outputPath, null, generateCredits(segment, job.resolution));
     } catch (error) {
       failed += 1;
       // Failed generations are refunded by Higgsfield, so they cost nothing.

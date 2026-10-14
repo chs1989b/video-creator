@@ -624,3 +624,19 @@ test('GET /voices lists the voices with which samples exist, and serves a sample
     server.close();
   }
 });
+
+test('POST /jobs keeps the chosen resolution and refuses other values', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const ok = sourceForm({ url: 'https://e.com/v.mp4' });
+    ok.append('resolution', '480p');
+    assert.equal((await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: ok })).json()).resolution, '480p');
+    const plain = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: sourceForm({ url: 'https://e.com/v.mp4' }) })).json();
+    assert.equal(plain.resolution, '720p');
+    const bad = sourceForm({ url: 'https://e.com/v.mp4' });
+    bad.append('resolution', '1080p');
+    assert.equal((await fetch(`${baseUrl}/jobs`, { method: 'POST', body: bad })).status, 400);
+  } finally {
+    server.close();
+  }
+});

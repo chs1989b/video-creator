@@ -4,6 +4,7 @@ import type { NodeProps } from '@xyflow/react';
 import type { Job, StageName } from '../../lib/workerApi';
 import { STAGE_ORDER } from '../../lib/workerApi';
 import { NodeCard, type Tone } from './NodeCard';
+import { generateCredits } from '../../lib/costs';
 
 export type Stage = StageName;
 
@@ -48,7 +49,7 @@ function generateButtonLabel(job: Job | null, failed: boolean): string {
   const pending = (job?.segments ?? []).filter((s) => s.status !== 'done');
   if (pending.length === 0) return failed ? '이 단계 다시 실행' : '이 단계만 실행';
   const seconds = Math.round(pending.reduce((sum, s) => sum + (s.endSeconds - s.startSeconds), 0));
-  return `나머지 ${seconds}초 만들기 · 약 ${seconds * 7}크레딧`;
+  return `나머지 ${seconds}초 만들기 · 약 ${generateCredits(seconds, job?.resolution)}크레딧`;
 }
 
 function summarize(stage: Stage, job: Job | null): { text: string; tone: Tone } {

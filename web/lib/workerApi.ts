@@ -42,9 +42,10 @@ export type JobTotals = { previews: number; credits: number; krw: number };
 
 export const REJECT_REASONS = ['얼굴', '제품', '동작', '배경', '기타'] as const;
 /** 5 seconds x 7 credits per second (ad_multiplier). */
-export const PREVIEW_CREDITS = 35;
 
 export type Job = {
+  /** Generation resolution (480p or 720p). */
+  resolution?: string;
   /** Narration voice key (female-1, female-2, male-1, male-2). */
   voiceKey?: string;
   /** Set when the source was uploaded instead of linked. */
@@ -119,6 +120,8 @@ export type CreateJobInput = {
   preview?: boolean;
   /** Narration voice (worker default: female-1). */
   voiceKey?: string | null;
+  /** Generation resolution (worker default: 720p); fixed once the job exists. */
+  resolution?: string | null;
 };
 
 export async function createJob(
@@ -133,6 +136,7 @@ export async function createJob(
     autorun = true,
     preview = false,
     voiceKey = null,
+    resolution = null,
   }: CreateJobInput,
   { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
 ): Promise<Job> {
@@ -161,6 +165,9 @@ export async function createJob(
   }
   if (voiceKey) {
     form.append('voiceKey', voiceKey);
+  }
+  if (resolution) {
+    form.append('resolution', resolution);
   }
   const res = await request(`${baseUrl}/jobs`, { method: 'POST', body: form }, fetchFn, '작업 생성 실패');
   return res.json();

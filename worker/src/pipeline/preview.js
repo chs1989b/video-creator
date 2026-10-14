@@ -65,7 +65,7 @@ export async function runPreview(
     segmentIndex: segment.index,
     status: 'running',
     outputPath: null,
-    estimatedCredits: estimateCredits('ad_multiplier', { seconds: segmentSeconds(segment) }),
+    estimatedCredits: estimateCredits('ad_multiplier', { seconds: segmentSeconds(segment), resolution: job.resolution }),
     credits: null,
     verdict: null,
     reasons: [],
@@ -80,6 +80,7 @@ export async function runPreview(
     await d.generateFromSegment(segment.path, attempt.characterImagePath, outputPath, {
       productImagePath: attempt.productImagePath,
       prompt,
+      resolution: job.resolution,
     });
     const done = { status: 'done', outputPath, credits: attempt.estimatedCredits, finishedAt: new Date().toISOString() };
     await patchAttempt(db, jobId, attempt.id, done);

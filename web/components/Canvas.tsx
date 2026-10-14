@@ -28,6 +28,7 @@ import { StatsPanel } from './StatsPanel';
 import { HiggsfieldConnect } from './HiggsfieldConnect';
 import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
 import { sourceInputError } from '../lib/sourceInput';
+import { DEFAULT_RESOLUTION, previewCredits, generateCredits, toKrw, type Resolution } from '../lib/costs';
 import {
   OPTIONAL_NODES,
   hiddenNodeIds,
@@ -51,7 +52,6 @@ import {
   sendVerdict,
   unlockPreview,
   attemptOutputUrl,
-  PREVIEW_CREDITS,
   updateJobInputs,
   getConfig,
   STAGE_ORDER,
@@ -100,7 +100,7 @@ function buildInitialNodes(): Node<AnyNodeData>[] {
     { id: 'video', type: 'videoInput', position: { x: 0, y: 40 }, data: { url: '', onUrlChange: noop, file: null, onFileChange: noop, savedName: null, disabled: false } },
     { id: 'person', type: 'imageInput', position: { x: 20, y: 300 }, data: { title: '바꿀 인물', hint: '인물 사진', file: null, onFileChange: noop, disabled: false } },
     { id: 'product', type: 'imageInput', position: { x: 20, y: 560 }, data: { title: '바꿀 제품', hint: '제품 사진 (선택)', file: null, onFileChange: noop, disabled: false } },
-    { id: 'preview', type: 'preview', position: { x: 340, y: 260 }, data: { job: null, onRunPreview: null, onVerdict: null, onUnlock: null, attemptUrl: () => '', previewCredits: PREVIEW_CREDITS, prompt: '', onPromptChange: noop } },
+    { id: 'preview', type: 'preview', position: { x: 340, y: 260 }, data: { job: null, onRunPreview: null, onVerdict: null, onUnlock: null, attemptUrl: () => '', previewCredits: previewCredits(DEFAULT_RESOLUTION), resolution: DEFAULT_RESOLUTION, onResolutionChange: null, prompt: '', onPromptChange: noop } },
     { id: 'generate', type: 'stage', position: { x: 630, y: 300 }, data: stage('generate') },
     { id: 'merge', type: 'stage', position: { x: 920, y: 300 }, data: stage('merge') },
     { id: 'restyle-prompt', type: 'textInput', position: { x: 920, y: 40 }, data: { title: '의상·배경 프롬프트', placeholder: '예: 베이지 셔츠, 배경은 화이트 스튜디오', hint: '비우면 의상·배경은 그대로', value: '', onChange: noop, disabled: false } },
@@ -168,6 +168,7 @@ export function Canvas() {
   const [script, setScript] = useState('');
   const [previewPrompt, setPreviewPrompt] = useState('');
   const [voiceKey, setVoiceKey] = useState(DEFAULT_VOICE_KEY);
+  const [resolution, setResolution] = useState<Resolution>(DEFAULT_RESOLUTION);
   const [voices, setVoices] = useState<Voice[]>([]);
   const [user, setUser] = useState<{ username: string; name: string } | null>(null);
   // Bottom-right panels: at most one open, so they never cover each other.
@@ -266,6 +267,7 @@ export function Canvas() {
       setEditPrompt(saved.editPrompt ?? '');
       setScript(saved.script ?? '');
       setVoiceKey(saved.voiceKey ?? DEFAULT_VOICE_KEY);
+      setResolution((saved.resolution as Resolution | undefined) ?? DEFAULT_RESOLUTION);
       setPresent(presentFromJob(saved));
       if (saved.status === 'running') startPolling(saved.id);
     },
@@ -320,6 +322,7 @@ export function Canvas() {
           youtubeUrl: sourceFile ? null : url,
           sourceVideo: sourceFile,
           voiceKey,
+          resolution,
           characterImage: personFile,
           productImage: productFile,
           script,
@@ -339,7 +342,7 @@ export function Canvas() {
         setIsSubmitting(false);
       }
     },
-    [url, sourceFile, personFile, productFile, script, restylePrompt, editPrompt, voiceKey, startPolling, lastJobKey],
+    [url, sourceFile, personFile, productFile, script, restylePrompt, editPrompt, voiceKey, resolution, startPolling, lastJobKey],
   );
 
   // Prompts/script typed after approval, not yet saved on the job.
@@ -412,7 +415,8 @@ export function Canvas() {
 
   const handleUnlock = useCallback(async () => {
     if (!job) return;
-    if (!window.confirm(`미리보기 1회를 더 허용할까요? 약 ${PREVIEW_CREDITS}크레딧(약 ${(PREVIEW_CREDITS * 60).toLocaleString()}원)이 듭니다.`)) return;
+    const cost = previewCredits(job.resolution);
+    if (!window.confirm(`미리보기 1회를 더 허용할까요? 약 ${cost}크레딧(약 ${toKrw(cost).toLocaleString()}원)이 듭니다.`)) return;
     try {
       setJob(await unlockPreview(job.id));
     } catch (error) {
@@ -637,13 +641,15 @@ export function Canvas() {
         onUnlock: job && unlockAllowed(job) ? handleUnlock : null,
         attemptUrl: (attemptId: string) => (job ? attemptOutputUrl(job.id, attemptId) : ''),
         previewCredits: job?.segments[0]
-          ? Math.round((job.segments[0].endSeconds - job.segments[0].startSeconds) * 7)
-          : PREVIEW_CREDITS,
+          ? generateCredits(job.segments[0].endSeconds - job.segments[0].startSeconds, job.resolution)
+          : previewCredits(resolution),
+        resolution: ((job?.resolution as Resolution | undefined) ?? resolution),
+        onResolutionChange: job ? null : setResolution,
         prompt: previewPrompt,
         onPromptChange: setPreviewPrompt,
       },
     };
-  }, [url, sourceFile, personFile, productFile, restylePrompt, editPrompt, script, voiceKey, voices, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked, removeNode]);
+  }, [url, sourceFile, personFile, productFile, restylePrompt, editPrompt, script, voiceKey, voices, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked, removeNode, resolution]);
 
   const renderNodes = useMemo(
     () => {

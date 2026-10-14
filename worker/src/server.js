@@ -20,7 +20,7 @@ import {
   unlockPreview as defaultUnlockPreview,
   previewBlocker,
 } from './pipeline/preview.js';
-import { jobTotals, estimateRemaining } from './pipeline/costs.js';
+import { jobTotals, estimateRemaining, RESOLUTIONS, DEFAULT_RESOLUTION } from './pipeline/costs.js';
 import { jobStats } from './pipeline/stats.js';
 import { VOICES, DEFAULT_VOICE_KEY, isVoiceKey } from './pipeline/voices.js';
 import { MOCK_DEPS } from './pipeline/mockGenerators.js';
@@ -169,6 +169,8 @@ export function createApp({
     }
     const characterFiles = req.files?.characterImages ?? [];
     if (characterFiles.length !== 1) return reject('exactly one characterImages file is required');
+    const resolution = optionalText(req.body.resolution) ?? DEFAULT_RESOLUTION;
+    if (!RESOLUTIONS.includes(resolution)) return reject(`해상도는 ${RESOLUTIONS.join(', ')}만 고를 수 있습니다.`);
     const voiceKey = optionalText(req.body.voiceKey) ?? DEFAULT_VOICE_KEY;
     if (!isVoiceKey(voiceKey)) return reject(`모르는 목소리입니다: ${voiceKey}`);
 
@@ -185,6 +187,7 @@ export function createApp({
       sourceVideoPath: sourceFile?.path ?? null,
       sourceVideoName: sourceFile ? originalName(sourceFile) : null,
       voiceKey,
+      resolution,
     });
 
     await fs.mkdir(workDirFor(id), { recursive: true });
