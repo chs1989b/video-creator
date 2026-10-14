@@ -11,6 +11,7 @@ import {
 } from './voiceover.js';
 import { getJob, updateJob } from './db.js';
 import { STAGE_ORDER } from './stages.js';
+import { voiceFor } from './voices.js';
 import { PREVIEW_SECONDS, estimateCredits, segmentSeconds, PRICED_STAGES, stageCredits } from './costs.js';
 
 // Every stage records its own status and output on the job, so a run can stop
@@ -151,7 +152,7 @@ async function stageEdit(db, jobId, workDir, d) {
 async function stageVoiceover(db, jobId, workDir, d) {
   const job = await requireJob(db, jobId);
   const audioPath = path.join(workDir, 'voiceover.mp3');
-  await d.synthesizeSpeech(job.script, audioPath);
+  await d.synthesizeSpeech(job.script, audioPath, { voice: voiceFor(job.voiceKey) });
   const outputPath = path.join(workDir, 'final-voiced.mp4');
   await d.muxVoiceover(latestVideoPath(job), audioPath, outputPath);
   return outputPath;
@@ -236,6 +237,13 @@ export async function updateJobInputs(db, jobId, inputs) {
     if (later) throw new Error(`stage ${stage} can no longer change: ${later} already ran`);
     patch[field] = value;
     stages[stage] = { status: value ? 'pending' : 'skipped', outputPath: null, error: null };
+  }
+  // The voice is not a stage input of its own: it belongs to the voice-over
+  // and can change until that stage has run.
+  if ('voiceKey' in inputs && inputs.voiceKey !== job.voiceKey) {
+    voiceFor(inputs.voiceKey);
+    if (['done', 'running'].includes(stages.voiceover.status)) throw new Error('stage voiceover already ran');
+    patch.voiceKey = inputs.voiceKey;
   }
   if (Object.keys(patch).length === 0) return job;
 

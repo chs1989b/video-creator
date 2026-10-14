@@ -22,6 +22,7 @@ import {
 } from './pipeline/preview.js';
 import { jobTotals, estimateRemaining } from './pipeline/costs.js';
 import { jobStats } from './pipeline/stats.js';
+import { VOICES, DEFAULT_VOICE_KEY, isVoiceKey } from './pipeline/voices.js';
 import { MOCK_DEPS } from './pipeline/mockGenerators.js';
 import { STAGE_ORDER } from './pipeline/stages.js';
 
@@ -121,6 +122,26 @@ export function createApp({
     next();
   });
 
+  // Narration voices, and which sample clips exist on this machine
+  // (data/voice_samples/<key>-<ko|en>.mp3 — local files, not in git).
+  const samplePath = (key, lang) => path.join(dataDir, 'voice_samples', `${key}-${lang}.mp3`);
+  const exists = (p) => fs.access(p).then(() => true, () => false);
+  app.get('/voices', async (_req, res) => {
+    res.json(await Promise.all(VOICES.map(async ({ key, label, name, gender }) => ({
+      key, label, name, gender,
+      samples: { ko: await exists(samplePath(key, 'ko')), en: await exists(samplePath(key, 'en')) },
+    }))));
+  });
+  app.get('/voices/:key/sample', async (req, res) => {
+    const { key } = req.params;
+    const lang = req.query.lang;
+    if (!isVoiceKey(key) || !['ko', 'en'].includes(lang) || !(await exists(samplePath(key, lang)))) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+    res.type('audio/mpeg').sendFile(samplePath(key, lang));
+  });
+
   // Tries and cost so far, for the signed-in user's jobs made by this generator.
   app.get('/stats', async (req, res) => {
     const owner = ownerOf(req);
@@ -148,6 +169,8 @@ export function createApp({
     }
     const characterFiles = req.files?.characterImages ?? [];
     if (characterFiles.length !== 1) return reject('exactly one characterImages file is required');
+    const voiceKey = optionalText(req.body.voiceKey) ?? DEFAULT_VOICE_KEY;
+    if (!isVoiceKey(voiceKey)) return reject(`모르는 목소리입니다: ${voiceKey}`);
 
     const id = randomUUID();
     const characterImagePaths = characterFiles.map((file) => file.path);
@@ -161,6 +184,7 @@ export function createApp({
       ownerId: ownerOf(req),
       sourceVideoPath: sourceFile?.path ?? null,
       sourceVideoName: sourceFile ? originalName(sourceFile) : null,
+      voiceKey,
     });
 
     await fs.mkdir(workDirFor(id), { recursive: true });
@@ -196,7 +220,7 @@ export function createApp({
       return;
     }
     const inputs = {};
-    for (const field of ['script', 'restylePrompt', 'editPrompt']) {
+    for (const field of ['script', 'restylePrompt', 'editPrompt', 'voiceKey']) {
       if (req.body && field in req.body) inputs[field] = req.body[field];
     }
     try {

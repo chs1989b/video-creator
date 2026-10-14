@@ -2,6 +2,7 @@ import { Low } from 'lowdb';
 import { JSONFile } from 'lowdb/node';
 import { initialStages } from './stages.js';
 import { PREVIEW_LIMIT } from './costs.js';
+import { DEFAULT_VOICE_KEY } from './voices.js';
 
 export function createDb(dbPath) {
   const adapter = new JSONFile(dbPath);
@@ -36,6 +37,7 @@ export async function createJob(
     ownerId = null,
     sourceVideoPath = null,
     sourceVideoName = null,
+    voiceKey = DEFAULT_VOICE_KEY,
   },
 ) {
   return serialize(async () => {
@@ -52,6 +54,7 @@ export async function createJob(
       script,
       restylePrompt,
       editPrompt,
+      voiceKey,
       status: 'idle',
       currentStage: null,
       stages: initialStages({ restylePrompt, editPrompt, script }),
@@ -79,7 +82,7 @@ export async function createJob(
 // exactly as before (no preview required).
 function withPreviewDefaults(job) {
   return {
-    previewRequired: false, mock: false, ownerId: null, finishedAt: null, sourceVideoPath: null, sourceVideoName: null,
+    previewRequired: false, mock: false, ownerId: null, finishedAt: null, sourceVideoPath: null, sourceVideoName: null, voiceKey: DEFAULT_VOICE_KEY,
     previewLimit: PREVIEW_LIMIT, attempts: [], approvedAttemptId: null, generatePrompt: null, ...job,
   };
 }

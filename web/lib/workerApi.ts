@@ -45,6 +45,8 @@ export const REJECT_REASONS = ['얼굴', '제품', '동작', '배경', '기타']
 export const PREVIEW_CREDITS = 35;
 
 export type Job = {
+  /** Narration voice key (female-1, female-2, male-1, male-2). */
+  voiceKey?: string;
   /** Set when the source was uploaded instead of linked. */
   sourceVideoPath?: string | null;
   sourceVideoName?: string | null;
@@ -115,6 +117,8 @@ export type CreateJobInput = {
   autorun?: boolean;
   /** true = the job starts with 5-second previews that must be approved. */
   preview?: boolean;
+  /** Narration voice (worker default: female-1). */
+  voiceKey?: string | null;
 };
 
 export async function createJob(
@@ -128,6 +132,7 @@ export async function createJob(
     editPrompt = null,
     autorun = true,
     preview = false,
+    voiceKey = null,
   }: CreateJobInput,
   { baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {},
 ): Promise<Job> {
@@ -153,6 +158,9 @@ export async function createJob(
   }
   if (preview) {
     form.append('preview', 'true');
+  }
+  if (voiceKey) {
+    form.append('voiceKey', voiceKey);
   }
   const res = await request(`${baseUrl}/jobs`, { method: 'POST', body: form }, fetchFn, '작업 생성 실패');
   return res.json();
@@ -278,7 +286,7 @@ export function attemptOutputUrl(
   return `${baseUrl}/jobs/${jobId}/attempts/${attemptId}/output`;
 }
 
-export type JobInputs = { script?: string | null; restylePrompt?: string | null; editPrompt?: string | null };
+export type JobInputs = { script?: string | null; restylePrompt?: string | null; editPrompt?: string | null; voiceKey?: string };
 
 /** Add, change or clear optional prompts/script on an existing job (e.g. after a preview is approved). */
 export async function updateJobInputs(
@@ -293,6 +301,24 @@ export async function updateJobInputs(
     '입력 저장 실패',
   );
   return res.json();
+}
+
+export type Voice = {
+  key: string;
+  label: string;
+  name: string;
+  gender: 'female' | 'male';
+  /** Which local sample clips the worker has (data/voice_samples, not in git). */
+  samples: { ko: boolean; en: boolean };
+};
+
+export async function getVoices({ baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {}): Promise<Voice[]> {
+  const res = await request(`${baseUrl}/voices`, {}, fetchFn, '목소리 목록을 불러오지 못했습니다');
+  return res.json();
+}
+
+export function voiceSampleUrl(key: string, lang: 'ko' | 'en', { baseUrl = DEFAULT_BASE_URL }: { baseUrl?: string } = {}): string {
+  return `${baseUrl}/voices/${key}/sample?lang=${lang}`;
 }
 
 export type WorkerConfig = { generator: 'higgsfield' | 'mock' };

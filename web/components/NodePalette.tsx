@@ -12,7 +12,7 @@ const DESCRIPTIONS: Record<OptionalNode, { what: string; cost: string }> = {
   product: { what: '손에 든 제품까지 교체', cost: '추가 크레딧 0 (인물 교체와 한 번에)' },
   restyle: { what: '옷·배경을 프롬프트로 다시 그림', cost: '10초당 약 15크레딧' },
   edit: { what: '조명·톤 등 마무리 보정', cost: '10초당 약 15크레딧' },
-  voiceover: { what: '대본을 영어 음성으로 얹음', cost: '약 0.45크레딧' },
+  voiceover: { what: '대본을 한국어·영어 음성으로 얹음 (목소리 4종)', cost: '약 0.15~0.45크레딧' },
 };
 
 type Props = {

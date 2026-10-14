@@ -59,7 +59,12 @@ import {
   type StageName,
   type Verdict,
   type JobInputs,
+  getVoices,
+  type Voice,
 } from '../lib/workerApi';
+
+// Same default as the worker (pipeline/voices.js).
+const DEFAULT_VOICE_KEY = 'female-1';
 
 const nodeTypes = {
   videoInput: VideoInputNode,
@@ -162,6 +167,8 @@ export function Canvas() {
   const [editPrompt, setEditPrompt] = useState('');
   const [script, setScript] = useState('');
   const [previewPrompt, setPreviewPrompt] = useState('');
+  const [voiceKey, setVoiceKey] = useState(DEFAULT_VOICE_KEY);
+  const [voices, setVoices] = useState<Voice[]>([]);
   const [user, setUser] = useState<{ username: string; name: string } | null>(null);
   // Bottom-right panels: at most one open, so they never cover each other.
   const [openPanel, setOpenPanel] = useState<'stats' | 'history' | null>(null);
@@ -233,6 +240,12 @@ export function Canvas() {
       .catch(() => setErrorMessage('웹 서버에 연결할 수 없습니다.'));
   }, []);
 
+  // Narration voices (and which sample clips this machine has), once signed in.
+  useEffect(() => {
+    if (!user) return;
+    getVoices().then(setVoices).catch(() => setVoices([]));
+  }, [user]);
+
   const handleLogout = useCallback(async () => {
     await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     window.location.href = '/login';
@@ -252,6 +265,7 @@ export function Canvas() {
       setRestylePrompt(saved.restylePrompt ?? '');
       setEditPrompt(saved.editPrompt ?? '');
       setScript(saved.script ?? '');
+      setVoiceKey(saved.voiceKey ?? DEFAULT_VOICE_KEY);
       setPresent(presentFromJob(saved));
       if (saved.status === 'running') startPolling(saved.id);
     },
@@ -305,6 +319,7 @@ export function Canvas() {
         const created = await createJob({
           youtubeUrl: sourceFile ? null : url,
           sourceVideo: sourceFile,
+          voiceKey,
           characterImage: personFile,
           productImage: productFile,
           script,
@@ -324,7 +339,7 @@ export function Canvas() {
         setIsSubmitting(false);
       }
     },
-    [url, sourceFile, personFile, productFile, script, restylePrompt, editPrompt, startPolling, lastJobKey],
+    [url, sourceFile, personFile, productFile, script, restylePrompt, editPrompt, voiceKey, startPolling, lastJobKey],
   );
 
   // Prompts/script typed after approval, not yet saved on the job.
@@ -339,9 +354,10 @@ export function Canvas() {
       for (const [field, stage, value] of fields) {
         if (inputEditable(target, stage) && (value.trim() || null) !== (target[field] ?? null)) edits[field] = value;
       }
+      if (inputEditable(target, 'voiceover') && voiceKey !== (target.voiceKey ?? DEFAULT_VOICE_KEY)) edits.voiceKey = voiceKey;
       return edits;
     },
-    [restylePrompt, editPrompt, script],
+    [restylePrompt, editPrompt, script, voiceKey],
   );
 
   const syncInputs = useCallback(
@@ -606,6 +622,7 @@ export function Canvas() {
         onChange: setScript,
         disabled: isSubmitting || !inputEditable(job, 'voiceover'),
         onRemove: removeFor('voiceover'),
+        voice: { voices, value: voiceKey, onChange: setVoiceKey, disabled: isSubmitting || !inputEditable(job, 'voiceover') },
       },
       generate: stageData('generate'),
       merge: stageData('merge'),
@@ -626,7 +643,7 @@ export function Canvas() {
         onPromptChange: setPreviewPrompt,
       },
     };
-  }, [url, sourceFile, personFile, productFile, restylePrompt, editPrompt, script, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked, removeNode]);
+  }, [url, sourceFile, personFile, productFile, restylePrompt, editPrompt, script, voiceKey, voices, job, inputsLocked, isSubmitting, handleRunStage, handleRetrySegment, handleRunPreview, handleVerdict, handleUnlock, previewPrompt, photosLocked, removeNode]);
 
   const renderNodes = useMemo(
     () => {

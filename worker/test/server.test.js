@@ -583,3 +583,44 @@ test('GET /stats summarises only the caller\'s jobs made by this worker\'s gener
     server.close();
   }
 });
+
+test('POST /jobs and PATCH /jobs/:id take a known voiceKey only', async () => {
+  const { server, baseUrl } = await startTestServer();
+  try {
+    const form = sourceForm({ url: 'https://e.com/v.mp4' });
+    form.append('voiceKey', 'male-2');
+    const job = await (await fetch(`${baseUrl}/jobs`, { method: 'POST', body: form })).json();
+    assert.equal(job.voiceKey, 'male-2');
+
+    const bad = sourceForm({ url: 'https://e.com/v.mp4' });
+    bad.append('voiceKey', 'robot');
+    assert.equal((await fetch(`${baseUrl}/jobs`, { method: 'POST', body: bad })).status, 400);
+
+    const patch = (body) => fetch(`${baseUrl}/jobs/${job.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal((await (await patch({ voiceKey: 'female-2' })).json()).voiceKey, 'female-2');
+    assert.equal((await patch({ voiceKey: 'robot' })).status, 409);
+  } finally {
+    server.close();
+  }
+});
+
+test('GET /voices lists the voices with which samples exist, and serves a sample', async () => {
+  const { server, baseUrl, dataDir } = await startTestServer();
+  try {
+    await fs.mkdir(path.join(dataDir, 'voice_samples'), { recursive: true });
+    await fs.writeFile(path.join(dataDir, 'voice_samples', 'male-1-ko.mp3'), 'ID3fake');
+    const voices = await (await fetch(`${baseUrl}/voices`)).json();
+    assert.equal(voices.length, 4);
+    assert.deepEqual(voices.find((v) => v.key === 'male-1').samples, { ko: true, en: false });
+    assert.equal(voices.find((v) => v.key === 'female-1').label, '여성 1');
+
+    const sample = await fetch(`${baseUrl}/voices/male-1/sample?lang=ko`);
+    assert.equal(sample.status, 200);
+    assert.match(sample.headers.get('content-type'), /audio\/mpeg/);
+    assert.equal((await fetch(`${baseUrl}/voices/male-1/sample?lang=en`)).status, 404);
+    assert.equal((await fetch(`${baseUrl}/voices/robot/sample?lang=ko`)).status, 404);
+    assert.equal((await fetch(`${baseUrl}/voices/male-1/sample?lang=../x`)).status, 404);
+  } finally {
+    server.close();
+  }
+});

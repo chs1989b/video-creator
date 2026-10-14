@@ -337,3 +337,21 @@ test('ensureSegments splits an uploaded source file without downloading anything
   assert.equal(await fs.readFile(splitFrom, 'utf8'), 'fake video bytes');
   assert.equal(job.segments.length, 2);
 });
+
+test('the voice-over stage reads the script with the job\'s chosen voice', async () => {
+  const { db, tmpDir } = await setup({ script: '안녕하세요.', voiceKey: 'male-1' });
+  let used = null;
+  await runJob(db, 'job-1', tmpDir, happyDeps({
+    synthesizeSpeech: async (_t, outputPath, options) => { used = options?.voice; return { outputPath }; },
+  }));
+  assert.equal(used.voiceId, '6f98d3dd-324f-4845-8c28-c1d1647a06cd');
+});
+
+test('updateJobInputs changes the voice until the voice-over has run', async () => {
+  const { db, tmpDir } = await setup({ script: 'Hi.' });
+  assert.equal((await getJob(db, 'job-1')).voiceKey, 'female-1');
+  assert.equal((await updateJobInputs(db, 'job-1', { voiceKey: 'female-2' })).voiceKey, 'female-2');
+  await assert.rejects(updateJobInputs(db, 'job-1', { voiceKey: 'robot' }), /Unknown voice/);
+  await runJob(db, 'job-1', tmpDir, happyDeps());
+  await assert.rejects(updateJobInputs(db, 'job-1', { voiceKey: 'male-2' }), /already ran/);
+});
