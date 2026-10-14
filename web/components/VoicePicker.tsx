@@ -2,7 +2,7 @@
 
 import { useRef, useState } from 'react';
 import { voiceSampleUrl, type Voice } from '../lib/workerApi';
-import { narrationLanguage } from '../lib/narration';
+import { narrationLanguage, narrationLengthHint } from '../lib/narration';
 
 export type VoicePickerProps = {
   voices: Voice[];
@@ -11,15 +11,18 @@ export type VoicePickerProps = {
   disabled: boolean;
   /** The current script: decides which sample to play and what the hint says. */
   script: string;
+  /** Length of the job's video once known, to warn when the narration will be cut. */
+  videoSeconds: number | null;
 };
 
 const LANGUAGE_HINT = { ko: '한국어 대본으로 읽습니다', en: '영어 대본으로 읽습니다' } as const;
 
 /** Narration voice: two female, two male, each able to read Korean and English. */
-export function VoicePicker({ voices, value, onChange, disabled, script }: VoicePickerProps) {
+export function VoicePicker({ voices, value, onChange, disabled, script, videoSeconds }: VoicePickerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [playing, setPlaying] = useState(false);
   const language = narrationLanguage(script);
+  const length = narrationLengthHint(script, videoSeconds);
   const voice = voices.find((v) => v.key === value);
   // Play the sample in the script's language; with no script yet, Korean first.
   const sampleLang = language ?? (voice?.samples.ko ? 'ko' : 'en');
@@ -66,6 +69,11 @@ export function VoicePicker({ voices, value, onChange, disabled, script }: Voice
       <div className="mt-1 text-[11.5px] text-[var(--ink-muted)]">
         {language ? LANGUAGE_HINT[language] : '대본을 쓴 언어(한국어·영어)로 읽습니다'}
       </div>
+      {length && (
+        <div className={`mt-0.5 text-[11.5px] ${length.tone === 'warn' ? 'text-[var(--danger)]' : 'text-[var(--ink-muted)]'}`}>
+          {length.text}
+        </div>
+      )}
     </div>
   );
 }

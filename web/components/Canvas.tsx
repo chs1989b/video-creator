@@ -29,6 +29,7 @@ import { HiggsfieldConnect } from './HiggsfieldConnect';
 import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
 import { sourceInputError } from '../lib/sourceInput';
 import { modeBanner, type ModeBanner } from '../lib/modeBanner';
+import { jobVideoSeconds } from '../lib/narration';
 import { DEFAULT_RESOLUTION, previewCredits, generateCredits, toKrw, type Resolution } from '../lib/costs';
 import {
   OPTIONAL_NODES,
@@ -633,7 +634,7 @@ export function Canvas() {
         onChange: setScript,
         disabled: isSubmitting || !inputEditable(job, 'voiceover'),
         onRemove: removeFor('voiceover'),
-        voice: { voices, value: voiceKey, onChange: setVoiceKey, disabled: isSubmitting || !inputEditable(job, 'voiceover') },
+        voice: { voices, value: voiceKey, onChange: setVoiceKey, disabled: isSubmitting || !inputEditable(job, 'voiceover'), videoSeconds: jobVideoSeconds(job, Boolean(restylePrompt.trim() || editPrompt.trim())) },
       },
       generate: stageData('generate'),
       merge: stageData('merge'),
