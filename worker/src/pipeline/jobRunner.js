@@ -264,6 +264,8 @@ export async function retrySegment(db, jobId, segmentIndex, workDir, deps = {}) 
   if (job.status === 'running') throw new Error('Job is already running');
   const segment = job.segments.find((s) => s.index === segmentIndex);
   if (!segment) throw new Error(`Segment not found: ${segmentIndex}`);
+  if (job.previewRequired && !job.approvedAttemptId) throw new Error(APPROVAL_REQUIRED);
+  if (segment.fromAttemptId) throw new Error('this segment is the approved preview and is not regenerated');
 
   const outputPath = path.join(workDir, `generated-${segmentIndex}.mp4`);
   await updateJob(db, jobId, { status: 'running', currentStage: 'generate', error: null });

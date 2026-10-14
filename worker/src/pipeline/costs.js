@@ -61,7 +61,9 @@ export function jobTotals(job) {
   const segmentCredits = job.segments.reduce((sum, s) => sum + (s.credits ?? 0), 0);
   const finishing = PRICED_STAGES.reduce((sum, s) => sum + (job.stages?.[s]?.credits ?? 0), 0);
   const credits = round2(previewCredits + segmentCredits + finishing);
-  return { previews: attempts.length, credits, krw: toKrw(credits) };
+  // Failed previews are refunded and do not use up the limit, so they are not counted here either.
+  const previews = attempts.filter((a) => a.status !== 'failed').length;
+  return { previews, credits, krw: toKrw(credits) };
 }
 
 export function estimateRemaining(job) {

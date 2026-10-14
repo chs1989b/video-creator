@@ -26,7 +26,7 @@ import { NodePalette, PALETTE_MIME } from './NodePalette';
 import { JobHistory } from './JobHistory';
 import { StatsPanel } from './StatsPanel';
 import { HiggsfieldConnect } from './HiggsfieldConnect';
-import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
+import { previewAllowed, unlockAllowed, inputEditable, approvalWaitLabel } from '../lib/previewRules';
 import { sourceInputError } from '../lib/sourceInput';
 import { modeBanner, type ModeBanner } from '../lib/modeBanner';
 import { jobVideoSeconds } from '../lib/narration';
@@ -600,7 +600,9 @@ export function Canvas() {
           : null,
       onRetrySegment: stage === 'generate' && job ? handleRetrySegment : null,
       onRemove: isOptional(stage) && canToggle(job, stage) ? () => removeNode(stage) : null,
+      screenHasInput: isOptional(stage) ? Boolean(screenInput[stage].trim()) : null,
     });
+    const screenInput = { restyle: restylePrompt, edit: editPrompt, voiceover: script };
     const removeFor = (node: OptionalNode) => (canToggle(job, node) ? () => removeNode(node) : null);
     return {
       video: { url, onUrlChange: setUrl, file: sourceFile, onFileChange: setSourceFile, savedName: job?.sourceVideoName ?? null, disabled: inputsLocked },
@@ -681,8 +683,8 @@ export function Canvas() {
       ? '만드는 중'
       : !job
         ? '5초 미리보기 만들기'
-        : awaitingApproval
-          ? '미리보기를 승인하세요'
+        : awaitingApproval && job
+          ? approvalWaitLabel(job)
           : job.status === 'done' && !hasEdits
             ? '완성됨'
             : job.status === 'failed'

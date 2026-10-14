@@ -5,6 +5,7 @@ import type { Job, StageName } from '../../lib/workerApi';
 import { STAGE_ORDER } from '../../lib/workerApi';
 import { NodeCard, type Tone } from './NodeCard';
 import { generateCredits } from '../../lib/costs';
+import { inputEditable } from '../../lib/previewRules';
 
 export type Stage = StageName;
 
@@ -17,6 +18,8 @@ export type StageNodeData = {
   /** Present for the generate stage when segments failed. */
   onRetrySegment: ((index: number) => void) | null;
   onRemove?: (() => void) | null;
+  /** For restyle/edit/voiceover: whether the prompt or script on screen is filled (it may not be saved yet). */
+  screenHasInput?: boolean | null;
 };
 
 const titles: Record<Stage, string> = {
@@ -52,13 +55,22 @@ function generateButtonLabel(job: Job | null, failed: boolean): string {
   return `나머지 ${seconds}초 만들기 · 약 ${generateCredits(seconds, job?.resolution)}크레딧`;
 }
 
-function summarize(stage: Stage, job: Job | null): { text: string; tone: Tone } {
+const OPTIONAL = ['restyle', 'edit', 'voiceover'] as const;
+type OptionalStage = (typeof OPTIONAL)[number];
+const isOptionalStage = (stage: Stage): stage is OptionalStage => (OPTIONAL as readonly Stage[]).includes(stage);
+
+export function summarize(stage: Stage, job: Job | null, screenHasInput: boolean | null = null): { text: string; tone: Tone } {
   if (!job) return { text: '입력을 채우고 실행하세요', tone: 'idle' };
   if (stage === 'generate' && job.previewRequired && !job.approvedAttemptId) {
     return { text: '미리보기를 승인하면 실행됩니다', tone: 'idle' };
   }
   const state = job.stages[stage];
   if (!state) return { text: '대기', tone: 'idle' };
+  // The screen input is sent when the next run starts, so describe what that run will do.
+  if (screenHasInput !== null && isOptionalStage(stage) && inputEditable(job, stage)) {
+    if (state.status === 'skipped' && screenHasInput) return { text: '실행하면 입력한 내용으로 진행합니다', tone: 'idle' };
+    if (state.status === 'pending' && !screenHasInput) return { text: '입력을 비워 건너뜁니다', tone: 'idle' };
+  }
 
   switch (state.status) {
     case 'skipped':
@@ -86,7 +98,7 @@ function summarize(stage: Stage, job: Job | null): { text: string; tone: Tone } 
 
 export function StageNode({ data }: NodeProps & { data: StageNodeData }) {
   const { stage, job } = data;
-  const { text, tone } = summarize(stage, job);
+  const { text, tone } = summarize(stage, job, data.screenHasInput ?? null);
   const state = job?.stages[stage];
   const failedSegments = stage === 'generate' ? (job?.segments ?? []).filter((s) => s.status === 'failed') : [];
   const showRetries = state?.status === 'failed' && failedSegments.length > 0 && data.onRetrySegment;

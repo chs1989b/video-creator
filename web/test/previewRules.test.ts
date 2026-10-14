@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { previewAllowed, unlockAllowed, previewStatus, inputEditable } from '../lib/previewRules';
+import { previewAllowed, unlockAllowed, previewStatus, inputEditable, approvalWaitLabel } from '../lib/previewRules';
 import type { Attempt, Job } from '../lib/workerApi';
 
 const attempt = (n: number, status: Attempt['status'], verdict: Attempt['verdict'] = null): Attempt => ({
@@ -78,4 +78,13 @@ test('optional inputs are editable before a job exists and after approval, until
   expect(inputEditable(approved({ edit: 'done' }), 'voiceover')).toBe(true);
   expect(inputEditable(job({ approvedAttemptId: 'a1', status: 'running', stages: stages() }), 'voiceover')).toBe(false);
   expect(inputEditable(job({ previewRequired: false, stages: stages() }), 'voiceover')).toBe(false); // old jobs stay as before
+});
+
+test('while waiting for approval, the bottom button says what to do next on the preview card', () => {
+  expect(approvalWaitLabel(job())).toBe('미리보기 카드에서 5초 미리보기를 만드세요');
+  expect(approvalWaitLabel(job({ attempts: [attempt(1, 'done')] }))).toBe('미리보기를 보고 승인하거나 거절하세요');
+  expect(approvalWaitLabel(job({ attempts: [attempt(1, 'done', 'reject')] }))).toBe('미리보기 카드에서 다음 미리보기를 만드세요');
+  expect(approvalWaitLabel(job({ attempts: [attempt(1, 'failed')] }))).toBe('미리보기 카드에서 다음 미리보기를 만드세요');
+  const fiveRejected = [1, 2, 3, 4, 5].map((n) => attempt(n, 'done', 'reject'));
+  expect(approvalWaitLabel(job({ attempts: fiveRejected }))).toBe('미리보기 한도 도달 · 카드에서 1회 더 허용할 수 있습니다');
 });

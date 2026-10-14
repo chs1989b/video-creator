@@ -30,6 +30,9 @@ export function previewBlocker(job) {
   if (job.status === 'running') return 'job is already running';
   if (job.approvedAttemptId) return 'a preview is already approved; start a new job to change settings';
   if (usedPreviews(job) >= job.previewLimit) return `preview limit reached (${job.previewLimit})`;
+  // Each paid preview gets a verdict first, so the tries and reject reasons stay complete.
+  const last = job.attempts.at(-1);
+  if (last?.status === 'done' && !last.verdict) return 'judge the last preview (approve or reject) first';
   return null;
 }
 

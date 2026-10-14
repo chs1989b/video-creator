@@ -21,6 +21,15 @@ export function unlockAllowed(job: Job): boolean {
   return openForPreviews(job) && lastIsSettled(job) && usedPreviews(job) >= job.previewLimit;
 }
 
+/** The bottom button's text while a preview job waits for approval: what to do next. */
+export function approvalWaitLabel(job: Job): string {
+  const latest = latestAttempt(job);
+  if (!latest) return '미리보기 카드에서 5초 미리보기를 만드세요';
+  if (latest.status === 'done' && !latest.verdict) return '미리보기를 보고 승인하거나 거절하세요';
+  if (usedPreviews(job) >= job.previewLimit) return '미리보기 한도 도달 · 카드에서 1회 더 허용할 수 있습니다';
+  return '미리보기 카드에서 다음 미리보기를 만드세요';
+}
+
 export type PreviewStatus = { text: string; tone: 'idle' | 'active' | 'done' | 'failed' };
 
 /** What the preview card says about the job right now. */

@@ -85,3 +85,12 @@ test('estimateRemaining prices the remaining segments at the job\'s resolution',
   };
   assert.deepEqual(estimateRemaining(job).items, [{ stage: 'generate', credits: 75 }]);
 });
+
+test('jobTotals counts only previews that were charged, like the card does (failed ones are refunded)', () => {
+  const job = {
+    attempts: [{ status: 'done', credits: 35 }, { status: 'failed', credits: 0 }, { status: 'done', credits: 35 }],
+    segments: [],
+    stages: {},
+  };
+  assert.equal(jobTotals(job).previews, 2);
+});

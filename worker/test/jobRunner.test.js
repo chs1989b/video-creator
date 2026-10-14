@@ -355,3 +355,29 @@ test('updateJobInputs changes the voice until the voice-over has run', async () 
   await runJob(db, 'job-1', tmpDir, happyDeps());
   await assert.rejects(updateJobInputs(db, 'job-1', { voiceKey: 'male-2' }), /already ran/);
 });
+
+test('retrySegment on a preview job needs an approved preview and never regenerates the approved one', async () => {
+  const { db, tmpDir } = await setup();
+  await updateJob(db, 'job-1', {
+    previewRequired: true,
+    segments: [
+      { index: 0, path: '/tmp/s0.mp4', startSeconds: 0, endSeconds: 5, status: 'pending', resultPath: null, error: null, credits: null },
+      { index: 1, path: '/tmp/s1.mp4', startSeconds: 5, endSeconds: 15, status: 'failed', resultPath: null, error: 'x', credits: 0 },
+    ],
+  });
+  let calls = 0;
+  const gen = { generateFromSegment: async (_s, _c, o) => { calls += 1; return { outputPath: o }; } };
+  await assert.rejects(retrySegment(db, 'job-1', 1, tmpDir, gen), /approve a preview/);
+
+  await updateJob(db, 'job-1', {
+    approvedAttemptId: 'a1',
+    segments: [
+      { index: 0, path: '/tmp/s0.mp4', startSeconds: 0, endSeconds: 5, status: 'done', resultPath: '/tmp/preview-1.mp4', error: null, credits: 0, fromAttemptId: 'a1' },
+      { index: 1, path: '/tmp/s1.mp4', startSeconds: 5, endSeconds: 15, status: 'failed', resultPath: null, error: 'x', credits: 0 },
+    ],
+  });
+  await assert.rejects(retrySegment(db, 'job-1', 0, tmpDir, gen), /approved preview/);
+  assert.equal(calls, 0);
+  await retrySegment(db, 'job-1', 1, tmpDir, gen);
+  assert.equal(calls, 1);
+});

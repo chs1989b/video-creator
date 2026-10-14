@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createDb, createJob, getJob } from '../src/pipeline/db.js';
+import { createDb, createJob, getJob, updateJob } from '../src/pipeline/db.js';
 import { runStage } from '../src/pipeline/jobRunner.js';
 import { runPreview, recordVerdict, unlockPreview, previewBlocker, usedPreviews } from '../src/pipeline/preview.js';
 
@@ -112,7 +112,8 @@ test('rejecting keeps the job unapproved and stores the reasons', async () => {
 
 test('approving reuses the preview as segment 0 and the remaining generation uses its settings', async () => {
   const { db, tmpDir } = await setup();
-  await runPreview(db, 'job-1', tmpDir, { prompt: 'First try.' }, deps());
+  const first = await runPreview(db, 'job-1', tmpDir, { prompt: 'First try.' }, deps());
+  await recordVerdict(db, 'job-1', first.id, { verdict: 'reject', reasons: ['얼굴'] });
   const second = await runPreview(db, 'job-1', tmpDir, { prompt: 'Second try.', characterImagePath: '/tmp/b.png' }, deps());
 
   const approved = await recordVerdict(db, 'job-1', second.id, { verdict: 'approve' });
@@ -183,4 +184,23 @@ test('a 480p job previews and generates at 480p and records the 480p price', asy
   assert.deepEqual(generated.slice(1).map((g) => g.resolution), ['480p', '480p']);
   const job = await getJob(db, 'job-1');
   assert.deepEqual(job.segments.map((s) => s.credits), [0, 30, 30]);
+});
+
+test('a new preview waits until the last finished one is judged; a failed one needs no verdict', async () => {
+  const { db, tmpDir } = await setup();
+  const first = await runPreview(db, 'job-1', tmpDir, {}, deps());
+  assert.match(previewBlocker(await getJob(db, 'job-1')), /judge/);
+  await assert.rejects(runPreview(db, 'job-1', tmpDir, {}, deps()), /judge/);
+
+  await recordVerdict(db, 'job-1', first.id, { verdict: 'reject', reasons: ['동작'] });
+  await assert.rejects(runPreview(db, 'job-1', tmpDir, {}, deps([], { generateFromSegment: async () => { throw new Error('nsfw'); } })), /nsfw/);
+  assert.equal(previewBlocker(await getJob(db, 'job-1')), null);
+});
+
+test('a preview cannot be judged while the job is running', async () => {
+  const { db, tmpDir } = await setup();
+  const a = await runPreview(db, 'job-1', tmpDir, {}, deps());
+  await updateJob(db, 'job-1', { status: 'running' });
+  await assert.rejects(recordVerdict(db, 'job-1', a.id, { verdict: 'approve' }), /running/);
+  assert.equal((await getJob(db, 'job-1')).approvedAttemptId, null);
 });
