@@ -10,11 +10,13 @@ type Props = {
   /** Changes whenever the current job moves on, so an open list stays fresh. */
   refreshKey: string;
   onOpen: (jobId: string) => void;
+  /** Controlled by the canvas so only one bottom-right panel is open at a time. */
+  open: boolean;
+  onToggle: () => void;
 };
 
 /** "내 작업": the signed-in user's jobs, newest first; pick one to load it onto the canvas. */
-export function JobHistory({ currentJobId, refreshKey, onOpen }: Props) {
-  const [open, setOpen] = useState(false);
+export function JobHistory({ currentJobId, refreshKey, onOpen, open, onToggle }: Props) {
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,12 +34,12 @@ export function JobHistory({ currentJobId, refreshKey, onOpen }: Props) {
   }, [load, refreshKey]);
 
   return (
-    <div className="absolute bottom-7 right-5 z-20 flex flex-col items-end gap-2">
+    <div className="relative flex flex-col items-end">
       {open && (
         <div
           role="dialog"
           aria-label="내 작업 목록"
-          className="w-[360px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[12px] border border-[var(--card-border-strong)] bg-[var(--card)] shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
+          className="absolute bottom-full right-0 mb-2 w-[360px] max-w-[calc(100vw-40px)] overflow-hidden rounded-[12px] border border-[var(--card-border-strong)] bg-[var(--card)] shadow-[0_18px_50px_rgba(0,0,0,0.45)]"
         >
           <div className="flex items-center justify-between border-b border-[var(--card-border)] px-3.5 py-2.5">
             <span className="text-[13px] font-medium text-[var(--ink)]">내 작업</span>
@@ -53,7 +55,7 @@ export function JobHistory({ currentJobId, refreshKey, onOpen }: Props) {
                 <li key={job.id}>
                   <button
                     type="button"
-                    onClick={() => { onOpen(job.id); setOpen(false); }}
+                    onClick={() => { onOpen(job.id); onToggle(); }}
                     className={`block w-full border-b border-[var(--card-border)] px-3.5 py-2.5 text-left transition-colors hover:bg-[var(--well)] ${current ? 'bg-[var(--well)]' : ''}`}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -81,7 +83,7 @@ export function JobHistory({ currentJobId, refreshKey, onOpen }: Props) {
       )}
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={onToggle}
         aria-expanded={open}
         className="rounded-full border border-[var(--card-border-strong)] bg-[var(--pill)] px-4 py-2 text-[12.5px] text-[var(--ink)] shadow-[0_8px_24px_rgba(0,0,0,0.35)] backdrop-blur hover:border-[var(--media)]"
       >

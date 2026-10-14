@@ -566,3 +566,20 @@ test('POST /jobs keeps a Korean source file name readable', async () => {
     server.close();
   }
 });
+
+test('GET /stats summarises only the caller\'s jobs made by this worker\'s generator', async () => {
+  const { server, baseUrl, dataDir } = await startTestServer({ generator: 'mock' });
+  try {
+    const mine = await createOwnedJob(baseUrl, 'test');
+    await createOwnedJob(baseUrl, 'someone-else');
+    const db = createDb(path.join(dataDir, 'db.json'));
+    await updateJob(db, mine.id, { attempts: [{ id: 'a1', n: 1, status: 'done', verdict: 'reject', reasons: ['제품'], credits: 35 }] });
+
+    const stats = await (await fetch(`${baseUrl}/stats`, { headers: { 'x-owner-id': 'test' } })).json();
+    assert.equal(stats.mode, 'mock');
+    assert.equal(stats.jobs, 1);
+    assert.equal(stats.rejectReasons.find((r) => r.reason === '제품').count, 1);
+  } finally {
+    server.close();
+  }
+});

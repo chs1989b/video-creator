@@ -158,6 +158,26 @@ export async function createJob(
   return res.json();
 }
 
+export type Stats = {
+  /** Which generator's jobs these are: test-mode numbers are "what it would have cost". */
+  mode: 'mock' | 'higgsfield';
+  jobs: number;
+  approved: number;
+  completed: number;
+  avgPreviewsToApproval: number | null;
+  firstTryApprovalRate: number | null;
+  failedPreviews: number;
+  rejectReasons: Array<{ reason: string; count: number }>;
+  avgCostPerCompleted: { previewCredits: number; restCredits: number; finishingCredits: number; credits: number; krw: number } | null;
+  targetKrw: number;
+};
+
+/** Tries and cost so far for the signed-in user (worker GET /stats). */
+export async function getStats({ baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {}): Promise<Stats> {
+  const res = await request(`${baseUrl}/stats`, {}, fetchFn, '통계를 불러오지 못했습니다');
+  return res.json();
+}
+
 /** The signed-in user's jobs, newest first. */
 export async function listJobs({ baseUrl = DEFAULT_BASE_URL, fetchFn = fetch }: ClientOptions = {}): Promise<Job[]> {
   const res = await request(`${baseUrl}/jobs`, {}, fetchFn, '작업 목록을 불러오지 못했습니다');

@@ -21,6 +21,7 @@ import {
   previewBlocker,
 } from './pipeline/preview.js';
 import { jobTotals, estimateRemaining } from './pipeline/costs.js';
+import { jobStats } from './pipeline/stats.js';
 import { MOCK_DEPS } from './pipeline/mockGenerators.js';
 import { STAGE_ORDER } from './pipeline/stages.js';
 
@@ -118,6 +119,13 @@ export function createApp({
       return;
     }
     next();
+  });
+
+  // Tries and cost so far, for the signed-in user's jobs made by this generator.
+  app.get('/stats', async (req, res) => {
+    const owner = ownerOf(req);
+    const jobs = (await listJobs(db)).filter((j) => Boolean(j.mock) === mockMode && (!owner || j.ownerId === owner));
+    res.json({ mode: mockMode ? 'mock' : 'higgsfield', ...jobStats(jobs) });
   });
 
   app.get('/config', (_req, res) => {

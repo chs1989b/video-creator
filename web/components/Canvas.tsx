@@ -24,6 +24,7 @@ import { ResultNode, type ResultNodeData } from './nodes/ResultNode';
 import { PreviewNode, type PreviewNodeData } from './nodes/PreviewNode';
 import { NodePalette, PALETTE_MIME } from './NodePalette';
 import { JobHistory } from './JobHistory';
+import { StatsPanel } from './StatsPanel';
 import { HiggsfieldConnect } from './HiggsfieldConnect';
 import { previewAllowed, unlockAllowed, inputEditable } from '../lib/previewRules';
 import { sourceInputError } from '../lib/sourceInput';
@@ -162,6 +163,9 @@ export function Canvas() {
   const [script, setScript] = useState('');
   const [previewPrompt, setPreviewPrompt] = useState('');
   const [user, setUser] = useState<{ username: string; name: string } | null>(null);
+  // Bottom-right panels: at most one open, so they never cover each other.
+  const [openPanel, setOpenPanel] = useState<'stats' | 'history' | null>(null);
+  const togglePanel = (panel: 'stats' | 'history') => setOpenPanel((cur) => (cur === panel ? null : panel));
   // The last job is remembered per demo user, so signing in as someone else starts clean.
   const lastJobKey = user ? `${LAST_JOB_KEY}:${user.username}` : null;
   const [workerMock, setWorkerMock] = useState(false);
@@ -715,11 +719,20 @@ export function Canvas() {
       </div>
 
       {user && (
-        <JobHistory
-          currentJobId={job?.id ?? null}
-          refreshKey={`${job?.id ?? ''}:${job?.status ?? ''}:${job?.attempts.length ?? 0}`}
-          onOpen={openJob}
-        />
+        <div className="absolute bottom-7 right-5 z-20 flex items-end gap-2">
+          <StatsPanel
+            refreshKey={`${job?.id ?? ''}:${job?.status ?? ''}:${job?.attempts.length ?? 0}`}
+            open={openPanel === 'stats'}
+            onToggle={() => togglePanel('stats')}
+          />
+          <JobHistory
+            currentJobId={job?.id ?? null}
+            refreshKey={`${job?.id ?? ''}:${job?.status ?? ''}:${job?.attempts.length ?? 0}`}
+            onOpen={openJob}
+            open={openPanel === 'history'}
+            onToggle={() => togglePanel('history')}
+          />
+        </div>
       )}
 
       {errorMessage && (
